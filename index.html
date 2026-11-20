@@ -1,0 +1,1485 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>手書きプレビュー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&family=Yomogi&display=swap" rel="stylesheet">
+<style>
+/* ============ Tokens ============ */
+:root {
+  --bg: #F2F2F7;
+  --surface: #FFFFFF;
+  --fill: rgba(118,118,128,.12);
+  --fill-strong: rgba(118,118,128,.22);
+  --label: #1C1C1E;            /* 17.0:1 on surface */
+  --label-2: #55555C;          /* 7.4:1 on surface, 6.6:1 on bg */
+  --separator: rgba(60,60,67,.16);
+  --ink: #24407A;              /* ブルーブラック。10.1:1 on surface */
+  --ink-hover: #1B3366;
+  --on-ink: #FFFFFF;
+  --ink-tint: rgba(36,64,122,.10);
+  --fit: #1D7A45;              /* 5.4:1 */
+  --fit-tint: rgba(29,122,69,.12);
+  --shu: #B93A1E;              /* 添削の朱。5.7:1 */
+  --shu-tint: rgba(185,58,30,.11);
+  --desk: #E4E4EA;
+  --desk-dot: rgba(60,60,67,.13);
+  /* 用紙の上に載る要素は用紙が明るい前提で固定色 */
+  --guide: #24407A;
+  --guide-warn: #B93A1E;
+  --radius: 12px;
+  --ui: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1C1C1E; --surface: #2C2C2E;
+    --fill: rgba(118,118,128,.24); --fill-strong: rgba(118,118,128,.38);
+    --label: #F2F2F7; --label-2: #AEAEB2; --separator: rgba(84,84,88,.6);
+    --ink: #9DB4F0; --ink-hover: #B5C7F5; --on-ink: #0F1B36; --ink-tint: rgba(157,180,240,.16);
+    --fit: #5DD08A; --fit-tint: rgba(93,208,138,.16);
+    --shu: #FF8A6B; --shu-tint: rgba(255,138,107,.16);
+    --desk: #111113; --desk-dot: rgba(255,255,255,.07);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1C1C1E; --surface: #2C2C2E;
+  --fill: rgba(118,118,128,.24); --fill-strong: rgba(118,118,128,.38);
+  --label: #F2F2F7; --label-2: #AEAEB2; --separator: rgba(84,84,88,.6);
+  --ink: #9DB4F0; --ink-hover: #B5C7F5; --on-ink: #0F1B36; --ink-tint: rgba(157,180,240,.16);
+  --fit: #5DD08A; --fit-tint: rgba(93,208,138,.16);
+  --shu: #FF8A6B; --shu-tint: rgba(255,138,107,.16);
+  --desk: #111113; --desk-dot: rgba(255,255,255,.07);
+}
+
+/* ============ Base ============ */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--label);
+  display: flex; flex-direction: column;
+  height: 100dvh; overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+/* ============ Buttons ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 16px;
+  border: 0; border-radius: 10px;
+  font-size: 15px; font-weight: 600; white-space: nowrap;
+  cursor: pointer; user-select: none;
+  transition: background-color .15s, opacity .15s;
+}
+.btn-primary { background: var(--ink); color: var(--on-ink); }
+.btn-primary:hover { background: var(--ink-hover); }
+.btn-secondary { background: var(--fill); color: var(--ink); }
+.btn-secondary:hover { background: var(--fill-strong); }
+.btn-plain { background: transparent; color: var(--ink); padding: 0 12px; }
+.btn-plain:hover { background: var(--fill); }
+.btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+@media (min-width: 1024px) and (pointer: fine) {
+  .btn { min-height: 34px; font-size: 14px; padding: 0 14px; border-radius: 8px; }
+}
+
+/* ============ App bar ============ */
+.appbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--surface);
+  border-bottom: 1px solid var(--separator);
+  flex: none; z-index: 5;
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-mark { color: var(--ink); width: 22px; height: 22px; }
+.brand h1 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: .01em; white-space: nowrap; }
+.brand p { font-size: 13px; color: var(--label-2); margin: 0; white-space: nowrap; }
+.appbar .actions { display: flex; gap: 8px; flex: none; }
+@media (max-width: 639px) {
+  .brand p { display: none; }
+  .appbar .btn .label-long { display: none; }
+  .appbar .btn { padding: 0 12px; }
+}
+@media (min-width: 640px) { .appbar .btn .label-short { display: none; } }
+
+/* ============ Workspace ============ */
+.workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+@media (min-width: 1024px) { .workspace { flex-direction: row; } }
+
+.stage {
+  flex: 1; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column;
+  background-color: var(--desk);
+  background-image: radial-gradient(var(--desk-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.stage-canvas {
+  flex: 1; min-height: 0; position: relative;
+  display: grid; place-items: center;
+  padding: 20px;
+  container-type: size;
+  user-select: none;
+}
+.stage-canvas.is-dropping { box-shadow: inset 0 0 0 3px var(--ink); }
+
+/* Empty state */
+.empty {
+  max-width: 400px; text-align: center;
+  background: var(--surface); border-radius: 16px;
+  padding: 28px 24px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
+}
+.empty-art { width: 64px; height: 64px; margin: 0 auto 14px; color: var(--ink); }
+.empty h2 { font-size: 20px; margin: 0 0 8px; }
+.empty p { font-size: 15px; color: var(--label-2); margin: 0 0 20px; line-height: 1.65; }
+.empty .row { display: flex; flex-direction: column; gap: 8px; }
+.empty .hint { font-size: 13px; margin: 14px 0 0; display: none; }
+@media (hover: hover) and (pointer: fine) { .empty .hint { display: block; } }
+
+/* Paper */
+.paper { position: relative; line-height: 0; }
+.paper img {
+  display: block;
+  max-width: calc(100cqw - 40px);
+  max-height: calc(100cqh - 40px);
+  width: auto; height: auto;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 14px 36px rgba(0,0,0,.14);
+  pointer-events: none;
+}
+.layer { position: absolute; inset: 0; }
+#textLayer { overflow: hidden; border-radius: 3px; }
+#handleLayer { pointer-events: none; }
+
+.textbox { position: absolute; cursor: move; touch-action: none; line-height: normal; }
+.textbox:focus-visible { outline: none; }
+.textbox:focus-visible .guide { box-shadow: 0 0 0 3px rgba(36,64,122,.35); }
+.guide {
+  position: absolute; inset: 0;
+  border: 1.5px dashed var(--guide);
+  background: rgba(36,64,122,.04);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: border-color .2s, background-color .2s, opacity .2s;
+}
+.is-over .guide { border-color: var(--guide-warn); border-style: solid; background: rgba(185,58,30,.05); }
+.guides-off .guide { opacity: 0; }
+.guides-off .textbox { cursor: default; }
+
+.preview-text {
+  width: 100%; height: 100%;
+  padding: 4px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  overflow: visible;
+  color: #1e293b;
+}
+.font-handwriting-1 { font-family: 'Klee One', cursive; }
+.font-handwriting-2 { font-family: 'Yomogi', cursive; }
+.vertical-rl { writing-mode: vertical-rl; text-orientation: mixed; }
+
+/* Handles: 44px hit area, small visible mark */
+.handle-frame { position: absolute; }
+.handle {
+  position: absolute; width: 44px; height: 44px;
+  display: grid; place-items: center;
+  pointer-events: auto; touch-action: none;
+}
+.handle::before {
+  content: ""; display: block;
+  background: #fff; border: 2px solid var(--guide);
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: transform .12s;
+}
+.handle:hover::before, .handle.is-active::before { transform: scale(1.15); }
+.handle-w { right: -22px; top: 50%; margin-top: -22px; cursor: ew-resize; }
+.handle-w::before { width: 8px; height: 28px; border-radius: 4px; }
+.handle-h { bottom: -22px; left: 50%; margin-left: -22px; cursor: ns-resize; }
+.handle-h::before { width: 28px; height: 8px; border-radius: 4px; }
+.handle-font { right: -22px; bottom: -22px; cursor: nwse-resize; }
+.handle-font::before { width: 24px; height: 24px; border-radius: 50%; background: var(--guide); border-color: #fff; }
+.handle-font svg { position: absolute; width: 13px; height: 13px; stroke: #fff; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.is-over .handle::before { border-color: var(--guide-warn); }
+.is-over .handle-font::before { background: var(--guide-warn); border-color: #fff; }
+.guides-off .handle { display: none; }
+
+.drag-badge {
+  position: absolute; right: 18px; bottom: 30px;
+  padding: 4px 10px; border-radius: 8px;
+  background: rgba(28,28,30,.86); color: #fff;
+  font: 600 13px/1.4 var(--ui); font-variant-numeric: tabular-nums;
+  pointer-events: none; white-space: nowrap;
+}
+
+/* Stage bar: 収まり具合（このツールの主役） */
+.stage-bar {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--separator);
+}
+.fit {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 6px 12px 6px 8px; border-radius: 999px;
+  background: var(--fit-tint); color: var(--fit);
+  transition: background-color .2s, color .2s;
+}
+.fit.is-over { background: var(--shu-tint); color: var(--shu); }
+.fit.is-idle { background: var(--fill); color: var(--label-2); }
+.fit-icon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: currentColor; flex: none; }
+.fit-icon svg { width: 14px; height: 14px; stroke: var(--surface); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.fit-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.fit-title { font-weight: 700; font-size: 15px; }
+.fit-detail { font-size: 13px; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ============ Inspector ============ */
+.inspector {
+  flex: none;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  height: 46dvh;
+  border-top: 1px solid var(--separator);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 1024px) {
+  .inspector { width: 380px; height: auto; border-top: 0; border-left: 1px solid var(--separator); }
+}
+.segmented {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  margin: 12px 16px 4px; padding: 2px;
+  background: var(--fill); border-radius: 9px;
+  flex: none;
+}
+.segmented button {
+  min-height: 36px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--label);
+  font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.segmented button[aria-selected="true"], .segmented button[aria-checked="true"] {
+  background: var(--surface); font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04);
+}
+:root[data-theme="dark"] .segmented button[aria-selected="true"],
+:root[data-theme="dark"] .segmented button[aria-checked="true"] { background: #636366; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .segmented button[aria-selected="true"],
+  :root:not([data-theme="light"]) .segmented button[aria-checked="true"] { background: #636366; }
+}
+.panel { flex: 1; overflow-y: auto; padding: 12px 16px 20px; }
+.panel section { display: flex; flex-direction: column; gap: 20px; }
+
+.field-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--label-2); margin: 0 0 8px; display: block; }
+.field-head .field-label { margin: 0; }
+.count { font-size: 13px; color: var(--label-2); font-variant-numeric: tabular-nums; }
+
+textarea {
+  width: 100%; min-height: 168px; resize: vertical;
+  padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--separator); background: var(--bg);
+  font-size: 16px; line-height: 1.7;
+}
+textarea:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px var(--ink-tint); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  min-height: 36px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--separator); background: transparent; color: var(--label);
+  font-size: 14px; cursor: pointer;
+}
+.chip:hover { background: var(--fill); }
+
+.tips { margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--label-2); display: grid; gap: 6px; }
+.tips li { display: grid; grid-template-columns: 20px 1fr; gap: 6px; }
+.tips b { color: var(--label); font-weight: 600; }
+.tips .k { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 0 5px; border-radius: 4px; background: var(--fill); color: var(--label); }
+.tips .kb { display: none; }
+@media (hover: hover) and (pointer: fine) { .tips .kb { display: grid; } }
+
+/* Grouped rows */
+.group { background: var(--bg); border-radius: var(--radius); padding: 4px 14px; }
+.row-ctl { padding: 12px 0; }
+.row-ctl + .row-ctl { border-top: 1px solid var(--separator); }
+.row-ctl .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.row-ctl .name { font-size: 15px; font-weight: 500; }
+.row-ctl .val { font-size: 15px; color: var(--label-2); font-variant-numeric: tabular-nums; }
+.row-ctl .note { font-size: 13px; color: var(--label-2); margin: 6px 0 0; }
+.stepper { display: flex; align-items: center; gap: 8px; }
+.step {
+  width: 44px; height: 44px; flex: none;
+  border: 0; border-radius: 50%; background: var(--fill); color: var(--ink);
+  display: grid; place-items: center; cursor: pointer;
+}
+.step:hover { background: var(--fill-strong); }
+@media (min-width: 1024px) and (pointer: fine) { .step { width: 32px; height: 32px; } }
+input[type="range"] { flex: 1; accent-color: var(--ink); height: 28px; cursor: pointer; min-width: 0; }
+
+select {
+  width: 100%; min-height: 44px; padding: 0 12px;
+  border-radius: 10px; border: 1px solid var(--separator); background: var(--surface);
+  font-size: 15px;
+}
+@media (min-width: 1024px) and (pointer: fine) { select { min-height: 34px; } }
+.swatches { display: flex; gap: 6px; }
+.swatch {
+  width: 44px; height: 44px; border: 0; background: transparent; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.swatch span { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.swatch[aria-checked="true"] span { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.swatch-name { font-size: 13px; color: var(--label-2); margin-top: 4px; }
+.seg-tight { margin: 0; }
+
+.stage-actions { display: flex; gap: 2px; flex: none; }
+@media (max-width: 479px) {
+  .stage-bar .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .stage-bar .btn-plain { width: 44px; padding: 0; }
+}
+
+/* ============ 用紙の調整（エディタ） ============ */
+dialog.editor {
+  padding: 0; border: 0; margin: 0;
+  width: 100vw; height: 100dvh; max-width: none; max-height: none;
+  background: var(--surface); color: var(--label);
+  overflow: hidden;
+}
+dialog.editor[open] { display: flex; flex-direction: column; }
+dialog.editor::backdrop { background: rgba(0,0,0,.5); }
+@media (min-width: 900px) {
+  dialog.editor { margin: auto; width: min(1040px, 94vw); height: min(760px, 92dvh); border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.35); }
+}
+.editor-head {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 6px 8px; padding-top: max(6px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--separator); flex: none;
+}
+.editor-head h2 { font-size: 17px; margin: 0; text-align: center; }
+.editor-head .btn-primary { justify-self: end; }
+.editor-head .btn-plain { justify-self: start; }
+.editor-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+@media (min-width: 900px) { .editor-body { flex-direction: row; } }
+.editor-stage {
+  flex: 1; min-height: 0; min-width: 0; position: relative;
+  display: grid; place-items: center; padding: 24px 24px 40px;
+  background: #161618;
+  touch-action: none; cursor: grab; user-select: none;
+}
+.editor-stage.is-panning { cursor: grabbing; }
+.editor-frame { position: relative; line-height: 0; }
+.editor-frame canvas { display: block; box-shadow: 0 0 0 1px rgba(255,255,255,.25); }
+.editor-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,.45) 1px, transparent 1px);
+  background-size: 33.333% 33.333%;
+  mix-blend-mode: difference; /* 白い用紙の上でも暗い写真の上でも見える */
+  opacity: .8; transition: opacity .2s;
+}
+.editor-grid.fine {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,.3) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,.3) 1px, transparent 1px);
+  background-size: 8.333% 8.333%;
+  opacity: 1;
+}
+/* 切り抜き枠 */
+.crop-shade-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.crop-shade { position: absolute; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); outline: 1px solid rgba(255,255,255,.9); }
+.crop-box { position: absolute; pointer-events: none; }
+.crop-box .editor-grid { inset: 0; }
+.crop-h { position: absolute; width: 44px; height: 44px; pointer-events: auto; touch-action: none; }
+.crop-h::before { content: ""; position: absolute; filter: drop-shadow(0 0 1.5px rgba(0,0,0,.7)); }
+.crop-h[data-h="nw"] { left: -22px; top: -22px; cursor: nwse-resize; }
+.crop-h[data-h="ne"] { right: -22px; top: -22px; cursor: nesw-resize; }
+.crop-h[data-h="sw"] { left: -22px; bottom: -22px; cursor: nesw-resize; }
+.crop-h[data-h="se"] { right: -22px; bottom: -22px; cursor: nwse-resize; }
+.crop-h[data-h="nw"]::before { left: 19px; top: 19px; width: 20px; height: 20px; border-left: 3px solid #fff; border-top: 3px solid #fff; }
+.crop-h[data-h="ne"]::before { right: 19px; top: 19px; width: 20px; height: 20px; border-right: 3px solid #fff; border-top: 3px solid #fff; }
+.crop-h[data-h="sw"]::before { left: 19px; bottom: 19px; width: 20px; height: 20px; border-left: 3px solid #fff; border-bottom: 3px solid #fff; }
+.crop-h[data-h="se"]::before { right: 19px; bottom: 19px; width: 20px; height: 20px; border-right: 3px solid #fff; border-bottom: 3px solid #fff; }
+.crop-h[data-h="n"] { top: -22px; left: 50%; margin-left: -22px; cursor: ns-resize; }
+.crop-h[data-h="s"] { bottom: -22px; left: 50%; margin-left: -22px; cursor: ns-resize; }
+.crop-h[data-h="e"] { right: -22px; top: 50%; margin-top: -22px; cursor: ew-resize; }
+.crop-h[data-h="w"] { left: -22px; top: 50%; margin-top: -22px; cursor: ew-resize; }
+.crop-h[data-h="n"]::before { left: 10px; top: 19px; width: 24px; height: 3px; background: #fff; }
+.crop-h[data-h="s"]::before { left: 10px; bottom: 19px; width: 24px; height: 3px; background: #fff; }
+.crop-h[data-h="e"]::before { top: 10px; right: 19px; width: 3px; height: 24px; background: #fff; }
+.crop-h[data-h="w"]::before { top: 10px; left: 19px; width: 3px; height: 24px; background: #fff; }
+.crop-box.locked .crop-h.edge { display: none; }
+.chip[aria-checked="true"] { background: var(--ink); color: var(--on-ink); border-color: transparent; font-weight: 600; }
+.crop-size { font-size: 13px; color: var(--label-2); margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+
+.editor-hint {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  font-size: 13px; color: rgba(255,255,255,.75); white-space: nowrap; pointer-events: none;
+}
+.editor-controls {
+  flex: none; overflow-y: auto;
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  max-height: 46dvh;
+  display: flex; flex-direction: column; gap: 16px;
+}
+@media (min-width: 900px) {
+  .editor-controls { width: 340px; max-height: none; border-left: 1px solid var(--separator); padding-top: 16px; }
+}
+.editor-row-btns { display: flex; gap: 8px; }
+.editor-row-btns .btn { flex: 1; }
+
+body.is-dragging { cursor: grabbing; }
+body.is-dragging * { user-select: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-bang" viewBox="0 0 24 24"><path d="M12 6v8"/><path d="M12 18.5v.01"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01"/></symbol>
+  <symbol id="i-crop" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+</svg>
+
+<header class="appbar">
+  <div class="brand">
+    <svg class="icon brand-mark" aria-hidden="true"><use href="#i-pen"/></svg>
+    <div>
+      <h1>手書きプレビュー</h1>
+      <p>書く前に、用紙に収まるか確かめる</p>
+    </div>
+  </div>
+  <div class="actions">
+    <label for="paperUpload" class="btn btn-secondary" id="pickBtn">
+      <svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg>
+      <span class="label-long" id="pickLabel">用紙を選ぶ</span><span class="label-short">用紙</span>
+    </label>
+    <input type="file" id="paperUpload" accept="image/*" class="sr-only" tabindex="-1">
+    <button id="saveBtn" class="btn btn-primary" disabled>
+      <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+      <span class="label-long">画像を保存</span><span class="label-short">保存</span>
+    </button>
+  </div>
+</header>
+
+<div class="workspace">
+  <main class="stage">
+    <div class="stage-canvas" id="canvasContainer">
+
+      <div class="empty" id="emptyState">
+        <svg class="empty-art" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <rect x="14" y="8" width="36" height="48" rx="3"/>
+          <path d="M21 20h22M21 28h22M21 36h22M21 44h12" opacity=".35"/>
+          <rect x="18" y="16" width="28" height="22" rx="2" stroke-dasharray="3 3"/>
+        </svg>
+        <h2>用紙の写真を選んでください</h2>
+        <p>便箋・カード・ハガキを真上から撮影して読み込むと、その上に文章を重ねて、書く前に収まり具合を確かめられます。</p>
+        <div class="row">
+          <label for="paperUpload" class="btn btn-primary">
+            <svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg>写真を選ぶ
+          </label>
+          <button class="btn btn-secondary" id="sampleBtn">サンプル便箋で試す</button>
+        </div>
+        <p class="hint">画像をここにドラッグ＆ドロップしても読み込めます</p>
+      </div>
+
+      <div class="paper" id="paperWrapper" hidden>
+        <img id="paperImage" alt="読み込んだ用紙">
+        <div class="layer" id="textLayer">
+          <div class="textbox" id="textContainer" tabindex="0" role="group"
+               aria-label="文章の枠。矢印キーで移動、Shift＋矢印キーで枠の大きさ、プラス・マイナスキーで文字の大きさを変更">
+            <div class="guide"></div>
+            <div class="preview-text font-handwriting-1" id="previewText"></div>
+          </div>
+        </div>
+        <div class="layer" id="handleLayer">
+          <div class="handle-frame" id="handleFrame">
+            <div class="handle handle-w" id="areaWidthHandle" title="枠の幅を変更" aria-hidden="true"></div>
+            <div class="handle handle-h" id="areaHeightHandle" title="枠の高さを変更" aria-hidden="true"></div>
+            <div class="handle handle-font" id="fontSizeHandle" title="ドラッグで文字の大きさを変更" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 10v7h-7M7 14V7h7"/></svg>
+            </div>
+            <div class="drag-badge" id="dragBadge" hidden></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-bar" id="stageBar" hidden>
+      <div class="fit is-idle" id="fitStatus" role="status" aria-live="polite">
+        <span class="fit-icon"><svg aria-hidden="true"><use id="fitIconUse" href="#i-dots"/></svg></span>
+        <span class="fit-text">
+          <span class="fit-title" id="fitTitle">確認中…</span>
+          <span class="fit-detail" id="fitDetail"></span>
+        </span>
+      </div>
+      <div class="stage-actions">
+        <button class="btn btn-plain" id="editPaperBtn">
+          <svg class="icon" aria-hidden="true"><use href="#i-crop"/></svg>
+          <span class="btn-label">用紙を調整</span>
+        </button>
+        <button class="btn btn-plain" id="toggleGuideBtn" aria-pressed="true">
+          <svg class="icon" aria-hidden="true"><use id="guideIconUse" href="#i-eye-off"/></svg>
+          <span class="btn-label" id="toggleGuideText">枠を隠す</span>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <aside class="inspector" aria-label="設定">
+    <div class="segmented" role="tablist" aria-label="設定の切り替え">
+      <button role="tab" id="tabbtn-text" aria-selected="true" aria-controls="tab-text" data-tab="text">文章</button>
+      <button role="tab" id="tabbtn-style" aria-selected="false" aria-controls="tab-style" data-tab="style" tabindex="-1">文字の調整</button>
+    </div>
+
+    <div class="panel">
+      <section id="tab-text" role="tabpanel" aria-labelledby="tabbtn-text">
+        <div>
+          <div class="field-head">
+            <label for="messageInput" class="field-label">書きたい文章</label>
+            <span class="count" id="charCount">0文字</span>
+          </div>
+          <textarea id="messageInput" placeholder="手紙やカードに書きたい文章を入力"></textarea>
+        </div>
+
+        <div>
+          <span class="field-label">例文を入れる</span>
+          <div class="chips">
+            <button type="button" class="chip sample-text-btn" data-text="拝啓&#10;&#10;秋冷の候、皆様におかれましてはますますご健勝のこととお慶び申し上げます。&#10;先日は温かいお心遣いをいただき、誠にありがとうございました。おかげさまで家族一同、元気に過ごしております。&#10;&#10;寒さに向かう折、どうかお体にはお気をつけください。まずは略儀ながら書中をもちまして御礼申し上げます。&#10;&#10;敬具">季節の手紙（長め）</button>
+            <button type="button" class="chip sample-text-btn" data-text="お誕生日おめでとう！&#10;いつも本当にありがとう。&#10;素敵な一年になりますように。">誕生日カード（短め）</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="field-label">使い方</span>
+          <ul class="tips">
+            <li><span>①</span><span><b>点線の枠</b>をドラッグして、書き出し位置に合わせる</span></li>
+            <li><span>②</span><span>枠の<b>右端・下端</b>をドラッグして、書ける範囲に広げる</span></li>
+            <li><span>③</span><span><b>右下の丸</b>をドラッグして、普段の自分の字の大きさに合わせる</span></li>
+            <li class="kb"><span>⌨</span><span>枠を選んで <span class="k">←↑↓→</span> で移動、<span class="k">Shift</span>＋矢印で大きさ、<span class="k">+</span> <span class="k">−</span> で文字サイズ</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="tab-style" role="tabpanel" aria-labelledby="tabbtn-style" hidden>
+        <div>
+          <span class="field-label" id="dirLabel">書く向き</span>
+          <div class="segmented seg-tight" role="radiogroup" aria-labelledby="dirLabel">
+            <button type="button" role="radio" aria-checked="true" id="dirHorizontal">横書き</button>
+            <button type="button" role="radio" aria-checked="false" id="dirVertical">縦書き</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="row-ctl">
+            <div class="top"><label class="name" for="fontSizeSlider">文字の大きさ</label><span class="val" id="fontSizeValue">20</span></div>
+            <div class="stepper">
+              <button class="step" data-step="fontSize" data-dir="-1" aria-label="文字を小さく"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+              <input type="range" id="fontSizeSlider" min="8" max="72" step="1" value="20">
+              <button class="step" data-step="fontSize" data-dir="1" aria-label="文字を大きく"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+            </div>
+          </div>
+          <div class="row-ctl">
+            <div class="top"><label class="name" for="lineHeightSlider">行間</label><span class="val" id="lineHeightValue">1.7倍</span></div>
+            <div class="stepper">
+              <button class="step" data-step="lineHeight" data-dir="-1" aria-label="行間を狭く"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+              <input type="range" id="lineHeightSlider" min="1.0" max="3.0" step="0.05" value="1.7">
+              <button class="step" data-step="lineHeight" data-dir="1" aria-label="行間を広く"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+            </div>
+            <p class="note">罫線のある便箋は、行が罫線に乗るように合わせます</p>
+          </div>
+          <div class="row-ctl">
+            <div class="top"><label class="name" for="letterSpacingSlider">字間</label><span class="val" id="letterSpacingValue">0.05em</span></div>
+            <div class="stepper">
+              <button class="step" data-step="letterSpacing" data-dir="-1" aria-label="字間を狭く"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+              <input type="range" id="letterSpacingSlider" min="-0.05" max="0.5" step="0.01" value="0.05">
+              <button class="step" data-step="letterSpacing" data-dir="1" aria-label="字間を広く"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="field-label" for="fontFamilySelect">書体</label>
+          <select id="fontFamilySelect">
+            <option value="font-handwriting-1">丁寧なペン字風</option>
+            <option value="font-handwriting-2">やわらか手書き風</option>
+          </select>
+        </div>
+
+        <div>
+          <span class="field-label" id="inkLabel">インクの色</span>
+          <div class="swatches" role="radiogroup" aria-labelledby="inkLabel">
+            <button type="button" class="swatch" role="radio" aria-checked="true" data-color="#1e293b" data-name="黒" aria-label="黒"><span style="background:#1e293b"></span></button>
+            <button type="button" class="swatch" role="radio" aria-checked="false" data-color="#1e3a8a" data-name="ブルーブラック" aria-label="ブルーブラック"><span style="background:#1e3a8a"></span></button>
+            <button type="button" class="swatch" role="radio" aria-checked="false" data-color="#78350f" data-name="セピア" aria-label="セピア"><span style="background:#78350f"></span></button>
+            <button type="button" class="swatch" role="radio" aria-checked="false" data-color="#be123c" data-name="ローズ" aria-label="ローズ"><span style="background:#be123c"></span></button>
+          </div>
+          <div class="swatch-name" id="inkName">黒</div>
+        </div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<dialog class="editor" id="editorDialog" aria-labelledby="editorTitle">
+  <div class="editor-head">
+    <button class="btn btn-plain" id="editorCancel">キャンセル</button>
+    <h2 id="editorTitle">用紙を調整</h2>
+    <button class="btn btn-primary" id="editorDone">完了</button>
+  </div>
+  <div class="editor-body">
+    <div class="editor-stage" id="editorStage">
+      <div class="editor-frame" id="editorFrame">
+        <canvas id="editorCanvas" aria-label="調整中の用紙。ドラッグで位置を移動、ピンチやホイールで拡大"></canvas>
+        <div class="crop-shade-layer"><div class="crop-shade" id="cropShade"></div></div>
+        <div class="crop-box" id="cropBox">
+          <div class="editor-grid" id="editorGrid"></div>
+          <div class="crop-h" data-h="nw" title="切り抜く範囲を変更"></div>
+          <div class="crop-h" data-h="ne" title="切り抜く範囲を変更"></div>
+          <div class="crop-h" data-h="sw" title="切り抜く範囲を変更"></div>
+          <div class="crop-h" data-h="se" title="切り抜く範囲を変更"></div>
+          <div class="crop-h edge" data-h="n" title="上端を変更"></div>
+          <div class="crop-h edge" data-h="s" title="下端を変更"></div>
+          <div class="crop-h edge" data-h="e" title="右端を変更"></div>
+          <div class="crop-h edge" data-h="w" title="左端を変更"></div>
+        </div>
+      </div>
+      <div class="editor-hint" id="editorHint">角をドラッグで切り抜き ・ 写真をドラッグで移動</div>
+    </div>
+    <div class="editor-controls">
+      <div class="editor-row-btns">
+        <button class="btn btn-secondary" id="rotateLeftBtn">
+          <svg class="icon" aria-hidden="true"><use href="#i-rotate"/></svg>90°回転
+        </button>
+        <button class="btn btn-secondary" id="editorReset">
+          <svg class="icon" aria-hidden="true"><use href="#i-reset"/></svg>元に戻す
+        </button>
+      </div>
+      <div>
+        <span class="field-label" id="cropLabel">切り抜きの比率</span>
+        <div class="chips" role="radiogroup" aria-labelledby="cropLabel" id="aspectChips">
+          <button type="button" class="chip" role="radio" data-aspect="free" aria-checked="true">自由</button>
+          <button type="button" class="chip" role="radio" data-aspect="orig" aria-checked="false">元の写真</button>
+          <button type="button" class="chip" role="radio" data-aspect="hagaki" aria-checked="false">ハガキ</button>
+          <button type="button" class="chip" role="radio" data-aspect="a" aria-checked="false">便箋（A判）</button>
+          <button type="button" class="chip" role="radio" data-aspect="square" aria-checked="false">正方形</button>
+        </div>
+        <p class="crop-size" id="cropSize"></p>
+      </div>
+      <div class="group">
+        <div class="row-ctl">
+          <div class="top"><label class="name" for="angleSlider">傾き補正</label><span class="val" id="angleValue">0.0°</span></div>
+          <div class="stepper">
+            <button class="step" data-estep="angle" data-dir="-1" aria-label="左に0.5度傾ける"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+            <input type="range" id="angleSlider" min="-45" max="45" step="0.5" value="0">
+            <button class="step" data-estep="angle" data-dir="1" aria-label="右に0.5度傾ける"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+          </div>
+          <p class="note">罫線や用紙の端がグリッドと平行になるように合わせます</p>
+        </div>
+        <div class="row-ctl">
+          <div class="top"><label class="name" for="zoomSlider">拡大</label><span class="val" id="zoomValue">100%</span></div>
+          <div class="stepper">
+            <button class="step" data-estep="zoom" data-dir="-1" aria-label="縮小"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+            <input type="range" id="zoomSlider" min="1" max="4" step="0.01" value="1">
+            <button class="step" data-estep="zoom" data-dir="1" aria-label="拡大"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+          </div>
+          <p class="note">拡大すると、枠の外は切り取られます。余白や机が写り込んだときに</p>
+        </div>
+      </div>
+      <div class="group">
+        <div class="row-ctl">
+          <div class="top"><label class="name" for="brightnessSlider">明るさ</label><span class="val" id="brightnessValue">0</span></div>
+          <div class="stepper">
+            <button class="step" data-estep="brightness" data-dir="-1" aria-label="暗く"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+            <input type="range" id="brightnessSlider" min="0.5" max="1.5" step="0.01" value="1">
+            <button class="step" data-estep="brightness" data-dir="1" aria-label="明るく"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+          </div>
+        </div>
+        <div class="row-ctl">
+          <div class="top"><label class="name" for="contrastSlider">コントラスト</label><span class="val" id="contrastValue">0</span></div>
+          <div class="stepper">
+            <button class="step" data-estep="contrast" data-dir="-1" aria-label="コントラストを下げる"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+            <input type="range" id="contrastSlider" min="0.5" max="1.5" step="0.01" value="1">
+            <button class="step" data-estep="contrast" data-dir="1" aria-label="コントラストを上げる"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+          </div>
+          <p class="note">暗い部屋で撮った写真や、紙が灰色に写ったときに</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const LIMITS = {
+  fontSize: { min: 8, max: 72, step: 1 },
+  lineHeight: { min: 1.0, max: 3.0, step: 0.05 },
+  letterSpacing: { min: -0.05, max: 0.5, step: 0.01 },
+};
+
+const state = {
+  hasImage: false,
+  text: "拝啓\n\nいつも温かいお心遣いをいただき、誠にありがとうございます。\nおかげさまで毎日元気に過ごしております。\n\n季節の変わり目ですので、どうかお体にはお気をつけください。\nまたお会いできる日を楽しみにしております。\n\n敬具",
+  fontSize: 20,
+  lineHeight: 1.7,
+  letterSpacing: 0.05,
+  direction: 'horizontal',
+  fontFamily: 'font-handwriting-1',
+  textColor: '#1e293b',
+  showGuides: true,
+  box: { left: 14, top: 16, width: 72, height: 68 },
+};
+
+const $ = (id) => document.getElementById(id);
+const el = {
+  paperUpload: $('paperUpload'), sampleBtn: $('sampleBtn'), saveBtn: $('saveBtn'), pickLabel: $('pickLabel'),
+  canvas: $('canvasContainer'), emptyState: $('emptyState'),
+  paperWrapper: $('paperWrapper'), paperImage: $('paperImage'), stageBar: $('stageBar'),
+  textContainer: $('textContainer'), previewText: $('previewText'), handleFrame: $('handleFrame'),
+  fontSizeHandle: $('fontSizeHandle'), areaWidthHandle: $('areaWidthHandle'), areaHeightHandle: $('areaHeightHandle'),
+  dragBadge: $('dragBadge'),
+  fitStatus: $('fitStatus'), fitTitle: $('fitTitle'), fitDetail: $('fitDetail'), fitIconUse: $('fitIconUse'),
+  toggleGuideBtn: $('toggleGuideBtn'), toggleGuideText: $('toggleGuideText'), guideIconUse: $('guideIconUse'),
+  messageInput: $('messageInput'), charCount: $('charCount'),
+  fontSizeSlider: $('fontSizeSlider'), fontSizeValue: $('fontSizeValue'),
+  lineHeightSlider: $('lineHeightSlider'), lineHeightValue: $('lineHeightValue'),
+  letterSpacingSlider: $('letterSpacingSlider'), letterSpacingValue: $('letterSpacingValue'),
+  dirHorizontal: $('dirHorizontal'), dirVertical: $('dirVertical'),
+  fontFamilySelect: $('fontFamilySelect'), inkName: $('inkName'),
+  swatches: document.querySelectorAll('.swatch'),
+  tabBtns: document.querySelectorAll('[role="tab"]'),
+  sampleTextBtns: document.querySelectorAll('.sample-text-btn'),
+  steps: document.querySelectorAll('.step'),
+};
+
+/* 文字サイズは「用紙の表示幅500pxのときのpx」で持つ。画面幅が変わっても収まり具合が変わらない */
+const PAPER_REF_WIDTH = 500;
+const paperScale = () => (el.paperImage.clientWidth || PAPER_REF_WIDTH) / PAPER_REF_WIDTH;
+const effFont = () => state.fontSize * paperScale();
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const round = (v, step) => Math.round(v / step) * step;
+
+/* ---------- 用紙 ---------- */
+function loadSamplePaper() {
+  const lines = Array.from({ length: 16 }, (_, i) => `<line x1="75" y1="${130 + i * 40}" x2="525" y2="${130 + i * 40}"/>`).join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="840" viewBox="0 0 600 840">
+    <rect width="600" height="840" fill="#fffdf9"/>
+    <rect x="30" y="30" width="540" height="780" fill="none" stroke="#e2d9c8" stroke-width="2" rx="8"/>
+    <rect x="36" y="36" width="528" height="768" fill="none" stroke="#e2d9c8" stroke-width="1" rx="6"/>
+    <g stroke="#dcd3c1" stroke-width="1.2">${lines}</g>
+    <circle cx="510" cy="760" r="18" fill="#fce7f3" opacity="0.7"/>
+    <circle cx="525" cy="745" r="12" fill="#e0e7ff" opacity="0.7"/>
+    <text x="300" y="75" font-family="sans-serif" font-size="14" fill="#a89f91" text-anchor="middle" letter-spacing="4">LETTER PAPER SAMPLE</text>
+  </svg>`;
+  loadSource(URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })));
+}
+
+/* 元画像は保持し、調整は毎回元画像から描き直す（劣化しない・やり直せる） */
+function loadSource(src) {
+  const img = new Image();
+  img.onload = () => {
+    state.source = img;
+    state.sourceSrc = src;
+    state.edit = editDefaults();
+    setPaperImage(src);
+  };
+  img.src = src;
+}
+
+function setPaperImage(src) {
+  el.paperImage.onload = () => {
+    state.hasImage = true;
+    el.emptyState.hidden = true;
+    el.paperWrapper.hidden = false;
+    el.stageBar.hidden = false;
+    el.saveBtn.disabled = false;
+    el.pickLabel.textContent = '用紙を変更';
+    updatePreview();
+  };
+  el.paperImage.src = src;
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => loadSource(ev.target.result);
+  reader.readAsDataURL(file);
+}
+
+/* ---------- 用紙の調整（回転・傾き・拡大・明るさ） ---------- */
+const EDIT_LIMITS = {
+  angle: { min: -45, max: 45, step: 0.5 },
+  zoom: { min: 1, max: 4, step: 0.1 },
+  brightness: { min: 0.5, max: 1.5, step: 0.05 },
+  contrast: { min: 0.5, max: 1.5, step: 0.05 },
+};
+const MAX_OUTPUT = 2400;
+function editDefaults() {
+  return { rot: 0, angle: 0, zoom: 1, u: { x: 0, y: 0 }, brightness: 1, contrast: 1,
+           crop: { x: 0, y: 0, w: 1, h: 1 }, aspect: 'free' };
+}
+const isFullCrop = (c) => c.x <= 0.0005 && c.y <= 0.0005 && c.w >= 0.999 && c.h >= 0.999;
+const isIdentity = (e) => e.rot === 0 && e.angle === 0 && e.zoom === 1 && e.brightness === 1 && e.contrast === 1 && isFullCrop(e.crop);
+/* 比率は「短辺/長辺」。向きは今の切り抜き枠に合わせる */
+const ASPECTS = { hagaki: 100 / 148, a: 1 / Math.SQRT2, square: 1 };
+
+const ed = {
+  dialog: $('editorDialog'), stage: $('editorStage'), frame: $('editorFrame'),
+  canvas: $('editorCanvas'), grid: $('editorGrid'),
+  angle: $('angleSlider'), angleValue: $('angleValue'),
+  zoom: $('zoomSlider'), zoomValue: $('zoomValue'),
+  brightness: $('brightnessSlider'), brightnessValue: $('brightnessValue'),
+  contrast: $('contrastSlider'), contrastValue: $('contrastValue'),
+  cropBox: $('cropBox'), cropShade: $('cropShade'), cropSize: $('cropSize'),
+  aspectChips: document.querySelectorAll('#aspectChips .chip'),
+  draft: null, k: 1,
+};
+
+/* 切り抜き枠を出力枠の画素単位で扱う */
+function cropPx(e, g) { const c = e.crop; return { x: c.x * g.W, y: c.y * g.H, w: c.w * g.W, h: c.h * g.H }; }
+function setCropPx(e, g, r) { e.crop = { x: r.x / g.W, y: r.y / g.H, w: r.w / g.W, h: r.h / g.H }; }
+
+function ratioFor(e, g) {
+  if (e.aspect === 'free') return null;
+  if (e.aspect === 'orig') return g.W / g.H;
+  const q = ASPECTS[e.aspect];
+  const c = cropPx(e, g);
+  return c.w >= c.h ? 1 / q : q;
+}
+
+/* 比率を選んだら、今の枠の中心を保ったまま、その比率で入る最大の枠にする */
+function applyAspect(e, g) {
+  const r = ratioFor(e, g);
+  if (!r) return;
+  const c = cropPx(e, g);
+  const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+  let w = Math.min(g.W, g.H * r), h = w / r;
+  const x = clamp(cx - w / 2, 0, g.W - w), y = clamp(cy - h / 2, 0, g.H - h);
+  setCropPx(e, g, { x, y, w, h });
+}
+
+/* 出力枠 W×H（元画像を90°単位で回した大きさ）と、枠を必ず覆う拡大率 */
+function geom(e, img) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const odd = e.rot % 2 === 1;
+  const W = odd ? h : w, H = odd ? w : h;
+  const phi = e.rot * Math.PI / 2 + e.angle * Math.PI / 180;
+  const c = Math.abs(Math.cos(phi)), s = Math.abs(Math.sin(phi));
+  const cover = Math.max((W * c + H * s) / w, (W * s + H * c) / h);
+  return { w, h, W, H, phi, scale: cover * e.zoom };
+}
+
+/* 枠の四隅が画像の外に出ないよう、画像座標系で移動量を制限 */
+function clampPan(e, g) {
+  const cos = Math.cos(-g.phi), sin = Math.sin(-g.phi);
+  let x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity;
+  for (const [px, py] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const ax = px * g.W / 2, ay = py * g.H / 2;
+    const qx = (ax * cos - ay * sin) / g.scale, qy = (ax * sin + ay * cos) / g.scale;
+    x0 = Math.max(x0, qx - g.w / 2); x1 = Math.min(x1, qx + g.w / 2);
+    y0 = Math.max(y0, qy - g.h / 2); y1 = Math.min(y1, qy + g.h / 2);
+  }
+  e.u.x = x0 > x1 ? 0 : clamp(e.u.x, x0, x1);
+  e.u.y = y0 > y1 ? 0 : clamp(e.u.y, y0, y1);
+}
+
+function renderEdit(ctx, e, img, g, k) {
+  const tx = g.scale * (Math.cos(g.phi) * e.u.x - Math.sin(g.phi) * e.u.y);
+  const ty = g.scale * (Math.sin(g.phi) * e.u.x + Math.cos(g.phi) * e.u.y);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.translate(g.W * k / 2 + tx * k, g.H * k / 2 + ty * k);
+  ctx.rotate(g.phi);
+  ctx.scale(g.scale * k, g.scale * k);
+  ctx.drawImage(img, -g.w / 2, -g.h / 2, g.w, g.h);
+  ctx.restore();
+}
+
+function drawEditor() {
+  const e = ed.draft, img = state.source;
+  if (!e || !img) return;
+  const g = geom(e, img);
+  clampPan(e, g);
+  const box = ed.stage.getBoundingClientRect();
+  const availW = Math.max(50, box.width - 48), availH = Math.max(50, box.height - 72);
+  ed.k = Math.min(availW / g.W, availH / g.H);
+  const cw = Math.round(g.W * ed.k), ch = Math.round(g.H * ed.k);
+  const dpr = window.devicePixelRatio || 1;
+  ed.canvas.style.width = `${cw}px`;
+  ed.canvas.style.height = `${ch}px`;
+  ed.canvas.width = Math.round(cw * dpr);
+  ed.canvas.height = Math.round(ch * dpr);
+  const ctx = ed.canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, ed.canvas.width, ed.canvas.height);
+  renderEdit(ctx, e, img, g, ed.k * dpr);
+  ed.canvas.style.filter = `brightness(${e.brightness}) contrast(${e.contrast})`;
+
+  const c = cropPx(e, g);
+  for (const node of [ed.cropBox, ed.cropShade]) {
+    node.style.left = `${c.x * ed.k}px`;
+    node.style.top = `${c.y * ed.k}px`;
+    node.style.width = `${c.w * ed.k}px`;
+    node.style.height = `${c.h * ed.k}px`;
+  }
+  ed.cropBox.classList.toggle('locked', e.aspect !== 'free');
+  ed.aspectChips.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.aspect === e.aspect)));
+  const outR = Math.min(1, MAX_OUTPUT / Math.max(c.w, c.h));
+  ed.cropSize.textContent = isFullCrop(e.crop)
+    ? `切り抜きなし（${Math.round(c.w * outR)} × ${Math.round(c.h * outR)}）`
+    : `${Math.round(c.w * outR)} × ${Math.round(c.h * outR)} に切り抜き`;
+
+  ed.angle.value = e.angle; ed.angleValue.textContent = `${e.angle > 0 ? '+' : ''}${e.angle.toFixed(1)}°`;
+  ed.zoom.value = e.zoom; ed.zoomValue.textContent = `${Math.round(e.zoom * 100)}%`;
+  const pct = (v) => { const n = Math.round((v - 1) * 100); return n > 0 ? `+${n}` : `${n}`; };
+  ed.brightness.value = e.brightness; ed.brightnessValue.textContent = pct(e.brightness);
+  ed.contrast.value = e.contrast; ed.contrastValue.textContent = pct(e.contrast);
+}
+
+function setEdit(key, v) {
+  const L = EDIT_LIMITS[key];
+  ed.draft[key] = parseFloat(clamp(v, L.min, L.max).toFixed(2));
+  drawEditor();
+}
+
+function openEditor() {
+  if (!state.source) return;
+  ed.draft = JSON.parse(JSON.stringify(state.edit));
+  ed.dialog.showModal();
+  requestAnimationFrame(drawEditor);
+}
+
+function closeEditor() { ed.dialog.close(); ed.draft = null; }
+
+async function applyEdit() {
+  const e = ed.draft, img = state.source;
+  state.edit = e;
+  closeEditor();
+  if (isIdentity(e)) { setPaperImage(state.sourceSrc); return; }
+  const g = geom(e, img);
+  clampPan(e, g);
+  const cp = cropPx(e, g);
+  const r = Math.min(1, MAX_OUTPUT / Math.max(cp.w, cp.h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(cp.w * r)); c.height = Math.max(1, Math.round(cp.h * r));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.save();
+  ctx.translate(-cp.x * r, -cp.y * r);
+  renderEdit(ctx, e, img, g, r);
+  ctx.restore();
+  if (e.brightness !== 1 || e.contrast !== 1) {
+    // CSSのbrightness→contrastと同じ式を画素に適用（Safariのcanvas filter非対応に備えて手計算）
+    const data = ctx.getImageData(0, 0, c.width, c.height);
+    const d = data.data, b = e.brightness, k = e.contrast;
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = ((i / 255 * b - 0.5) * k + 0.5) * 255;
+    for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+    ctx.putImageData(data, 0, 0);
+  }
+  c.toBlob((blob) => {
+    if (!blob) return;
+    if (state.editedUrl) URL.revokeObjectURL(state.editedUrl);
+    state.editedUrl = URL.createObjectURL(blob);
+    setPaperImage(state.editedUrl);
+  }, 'image/jpeg', 0.92);
+}
+
+function setupEditor() {
+  $('editPaperBtn').addEventListener('click', openEditor);
+  $('editorCancel').addEventListener('click', closeEditor);
+  $('editorDone').addEventListener('click', applyEdit);
+  ed.dialog.addEventListener('cancel', () => { ed.draft = null; }); // Escキー
+  $('editorReset').addEventListener('click', () => { ed.draft = editDefaults(); drawEditor(); });
+  $('rotateLeftBtn').addEventListener('click', () => {
+    const d = ed.draft;
+    d.rot = (d.rot + 3) % 4;
+    d.u = { x: 0, y: 0 };
+    // 切り抜き枠も一緒に90°回す（反時計回り: (x,y,w,h) → (y, 1-x-w, h, w)）
+    const c = d.crop;
+    d.crop = { x: c.y, y: 1 - c.x - c.w, w: c.h, h: c.w };
+    drawEditor();
+  });
+
+  ed.aspectChips.forEach((b) => b.addEventListener('click', () => {
+    const d = ed.draft;
+    d.aspect = b.dataset.aspect;
+    applyAspect(d, geom(d, state.source));
+    drawEditor();
+  }));
+
+  // 切り抜き枠のハンドル
+  document.querySelectorAll('.crop-h').forEach((h) => {
+    let start = null;
+    h.addEventListener('pointerdown', (e) => {
+      if (!ed.draft) return;
+      e.preventDefault(); e.stopPropagation();
+      h.setPointerCapture(e.pointerId);
+      const g = geom(ed.draft, state.source);
+      start = { x: e.clientX, y: e.clientY, c: cropPx(ed.draft, g) };
+    });
+    h.addEventListener('pointermove', (e) => {
+      if (!start || !ed.draft) return;
+      const d = ed.draft, g = geom(d, state.source);
+      const id = h.dataset.h;
+      const dx = (e.clientX - start.x) / ed.k, dy = (e.clientY - start.y) / ed.k;
+      const m = 48 / ed.k; // 最小サイズ（画面上48px）
+      const s = start.c;
+      let x0 = s.x, y0 = s.y, x1 = s.x + s.w, y1 = s.y + s.h;
+      if (id.includes('w')) x0 = clamp(x0 + dx, 0, x1 - m);
+      if (id.includes('e')) x1 = clamp(x1 + dx, x0 + m, g.W);
+      if (id.includes('n')) y0 = clamp(y0 + dy, 0, y1 - m);
+      if (id.includes('s')) y1 = clamp(y1 + dy, y0 + m, g.H);
+      const r = ratioFor(d, g);
+      if (r && id.length === 2) {
+        // 比率固定: 対角の角を固定して、比率を保ったまま範囲内に収める
+        const fx = id.includes('w') ? s.x + s.w : s.x;
+        const fy = id.includes('n') ? s.y + s.h : s.y;
+        let w = Math.abs(x1 - x0), h2 = Math.abs(y1 - y0);
+        if (w / h2 > r) w = h2 * r; else h2 = w / r;
+        const maxW = id.includes('w') ? fx : g.W - fx;
+        const maxH = id.includes('n') ? fy : g.H - fy;
+        if (w > maxW) { w = maxW; h2 = w / r; }
+        if (h2 > maxH) { h2 = maxH; w = h2 * r; }
+        if (w < m) { w = m; h2 = w / r; }
+        x0 = id.includes('w') ? fx - w : fx; x1 = x0 + w;
+        y0 = id.includes('n') ? fy - h2 : fy; y1 = y0 + h2;
+      }
+      setCropPx(d, g, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+      drawEditor();
+    });
+    const end = () => { start = null; };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+  });
+
+  for (const key of ['angle', 'zoom', 'brightness', 'contrast']) {
+    ed[key].addEventListener('input', (e) => setEdit(key, +e.target.value));
+  }
+  document.querySelectorAll('[data-estep]').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.estep;
+    setEdit(key, ed.draft[key] + EDIT_LIMITS[key].step * +b.dataset.dir);
+  }));
+
+  // 傾き補正中は細かいグリッドに
+  const fineOn = () => ed.grid.classList.add('fine');
+  const fineOff = () => ed.grid.classList.remove('fine');
+  ed.angle.addEventListener('pointerdown', fineOn);
+  ed.angle.addEventListener('focus', fineOn);
+  ed.angle.addEventListener('blur', fineOff);
+  window.addEventListener('pointerup', () => { if (document.activeElement !== ed.angle) fineOff(); });
+
+  // ドラッグで移動・ピンチで拡大（マウス・タッチ・ペン共通）
+  const pts = new Map();
+  let last = null;
+  ed.stage.addEventListener('pointerdown', (e) => {
+    if (!ed.draft) return;
+    ed.stage.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    last = snapshot();
+    ed.stage.classList.add('is-panning');
+  });
+  ed.stage.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId) || !ed.draft) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const now = snapshot();
+    if (now.n !== last.n) { last = now; return; }
+    const d = ed.draft, g = geom(d, state.source);
+    // 画面上の移動量 → 画像座標系
+    const dx = (now.cx - last.cx) / ed.k, dy = (now.cy - last.cy) / ed.k;
+    const cos = Math.cos(-g.phi), sin = Math.sin(-g.phi);
+    d.u.x += (dx * cos - dy * sin) / g.scale;
+    d.u.y += (dx * sin + dy * cos) / g.scale;
+    if (now.n >= 2 && last.dist > 0) {
+      d.zoom = clamp(d.zoom * (now.dist / last.dist), EDIT_LIMITS.zoom.min, EDIT_LIMITS.zoom.max);
+    }
+    last = now;
+    drawEditor();
+  });
+  const end = (e) => {
+    pts.delete(e.pointerId);
+    last = snapshot();
+    if (!pts.size) ed.stage.classList.remove('is-panning');
+  };
+  ed.stage.addEventListener('pointerup', end);
+  ed.stage.addEventListener('pointercancel', end);
+  ed.stage.addEventListener('wheel', (e) => {
+    if (!ed.draft) return;
+    e.preventDefault();
+    setEdit('zoom', ed.draft.zoom * Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+
+  function snapshot() {
+    const a = [...pts.values()];
+    const n = a.length;
+    if (!n) return { n: 0, cx: 0, cy: 0, dist: 0 };
+    const cx = a.reduce((s, p) => s + p.x, 0) / n, cy = a.reduce((s, p) => s + p.y, 0) / n;
+    const dist = n >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0;
+    return { n, cx, cy, dist };
+  }
+
+  window.addEventListener('resize', () => { if (ed.dialog.open) requestAnimationFrame(drawEditor); });
+}
+
+/* ---------- 描画 ---------- */
+function updatePreview() {
+  const t = el.previewText;
+  t.textContent = state.text;
+  const n = Array.from(state.text.replace(/\n/g, '')).length;
+  el.charCount.textContent = `${n}文字`;
+
+  t.style.fontSize = `${effFont()}px`;
+  t.style.lineHeight = state.lineHeight;
+  t.style.letterSpacing = `${state.letterSpacing}em`;
+  t.style.color = state.textColor;
+  t.classList.remove('font-handwriting-1', 'font-handwriting-2');
+  t.classList.add(state.fontFamily);
+  t.classList.toggle('vertical-rl', state.direction === 'vertical');
+
+  el.fontSizeSlider.value = state.fontSize;
+  el.fontSizeValue.textContent = `${state.fontSize}`;
+  el.lineHeightSlider.value = state.lineHeight;
+  el.lineHeightValue.textContent = `${state.lineHeight.toFixed(2).replace(/0$/, '')}倍`;
+  el.letterSpacingSlider.value = state.letterSpacing;
+  el.letterSpacingValue.textContent = `${state.letterSpacing.toFixed(2)}em`;
+
+  for (const node of [el.textContainer, el.handleFrame]) {
+    node.style.left = `${state.box.left}%`;
+    node.style.top = `${state.box.top}%`;
+    node.style.width = `${state.box.width}%`;
+    node.style.height = `${state.box.height}%`;
+  }
+
+  el.paperWrapper.classList.toggle('guides-off', !state.showGuides);
+  el.toggleGuideBtn.setAttribute('aria-pressed', String(state.showGuides));
+  el.toggleGuideText.textContent = state.showGuides ? '枠を隠す' : '枠を表示';
+  el.guideIconUse.setAttribute('href', state.showGuides ? '#i-eye-off' : '#i-eye');
+
+  requestAnimationFrame(updateFit);
+}
+
+/* 収まり具合: テキストの実寸と枠を比べ、行数に換算 */
+function measureFit() {
+  const t = el.previewText;
+  if (!state.text.trim()) return { empty: true };
+  const range = document.createRange();
+  range.selectNodeContents(t);
+  const r = range.getBoundingClientRect();
+  const b = t.getBoundingClientRect();
+  const pad = 4;
+  const lineAdv = effFont() * state.lineHeight;
+  let avail, used;
+  if (state.direction === 'vertical') {
+    avail = b.width - pad * 2;
+    used = (b.right - pad) - r.left;
+  } else {
+    avail = b.height - pad * 2;
+    used = r.bottom - (b.top + pad);
+  }
+  const diff = avail - used;
+  return { over: diff < -2, lines: diff / lineAdv };
+}
+
+function updateFit() {
+  if (!state.hasImage) return;
+  const f = measureFit();
+  const s = el.fitStatus;
+  s.classList.remove('is-over', 'is-idle');
+  el.paperWrapper.classList.remove('is-over');
+  if (f.empty) {
+    s.classList.add('is-idle');
+    el.fitIconUse.setAttribute('href', '#i-dots');
+    el.fitTitle.textContent = '文章が未入力です';
+    el.fitDetail.textContent = '「文章」に書きたい内容を入力';
+    return;
+  }
+  if (f.over) {
+    const n = Math.max(1, Math.ceil(-f.lines - 0.05));
+    s.classList.add('is-over');
+    el.paperWrapper.classList.add('is-over');
+    el.fitIconUse.setAttribute('href', '#i-bang');
+    el.fitTitle.textContent = `約${n}行はみ出しています`;
+    el.fitDetail.textContent = '文字を小さくするか、枠を広げてください';
+  } else {
+    const n = Math.floor(f.lines);
+    el.fitIconUse.setAttribute('href', '#i-check');
+    el.fitTitle.textContent = '枠内に収まっています';
+    el.fitDetail.textContent = n >= 1 ? `あと約${n}行書けます` : 'ちょうどぴったりです';
+  }
+}
+
+/* ---------- 操作 ---------- */
+function setValue(key, v) {
+  const L = LIMITS[key];
+  v = clamp(round(v, L.step), L.min, L.max);
+  state[key] = key === 'fontSize' ? Math.round(v) : parseFloat(v.toFixed(2));
+  updatePreview();
+}
+
+function selectTab(btn) {
+  el.tabBtns.forEach((b) => {
+    const on = b === btn;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    $(b.getAttribute('aria-controls')).hidden = !on;
+  });
+}
+
+function setDirection(dir) {
+  state.direction = dir;
+  el.dirHorizontal.setAttribute('aria-checked', String(dir === 'horizontal'));
+  el.dirVertical.setAttribute('aria-checked', String(dir === 'vertical'));
+  updatePreview();
+}
+
+function setupEventListeners() {
+  el.paperUpload.addEventListener('change', (e) => { loadFile(e.target.files[0]); e.target.value = ''; });
+  el.sampleBtn.addEventListener('click', loadSamplePaper);
+  el.saveBtn.addEventListener('click', savePreviewImage);
+
+  // ドラッグ＆ドロップ
+  el.canvas.addEventListener('dragover', (e) => { e.preventDefault(); el.canvas.classList.add('is-dropping'); });
+  el.canvas.addEventListener('dragleave', () => el.canvas.classList.remove('is-dropping'));
+  el.canvas.addEventListener('drop', (e) => {
+    e.preventDefault(); el.canvas.classList.remove('is-dropping');
+    loadFile(e.dataTransfer.files[0]);
+  });
+
+  el.messageInput.addEventListener('input', (e) => { state.text = e.target.value; updatePreview(); });
+  el.sampleTextBtns.forEach((btn) => btn.addEventListener('click', () => {
+    state.text = btn.dataset.text;
+    el.messageInput.value = state.text;
+    updatePreview();
+  }));
+
+  el.toggleGuideBtn.addEventListener('click', () => { state.showGuides = !state.showGuides; updatePreview(); });
+
+  el.fontSizeSlider.addEventListener('input', (e) => setValue('fontSize', +e.target.value));
+  el.lineHeightSlider.addEventListener('input', (e) => setValue('lineHeight', +e.target.value));
+  el.letterSpacingSlider.addEventListener('input', (e) => setValue('letterSpacing', +e.target.value));
+  el.steps.forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.step;
+    setValue(key, state[key] + LIMITS[key].step * +b.dataset.dir);
+  }));
+
+  el.dirHorizontal.addEventListener('click', () => setDirection('horizontal'));
+  el.dirVertical.addEventListener('click', () => setDirection('vertical'));
+  el.fontFamilySelect.addEventListener('change', (e) => { state.fontFamily = e.target.value; updatePreview(); });
+
+  el.swatches.forEach((btn) => btn.addEventListener('click', () => {
+    el.swatches.forEach((b) => b.setAttribute('aria-checked', String(b === btn)));
+    state.textColor = btn.dataset.color;
+    el.inkName.textContent = btn.dataset.name;
+    updatePreview();
+  }));
+
+  el.tabBtns.forEach((btn, i) => {
+    btn.addEventListener('click', () => selectTab(btn));
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const next = el.tabBtns[(i + (e.key === 'ArrowRight' ? 1 : -1) + el.tabBtns.length) % el.tabBtns.length];
+      selectTab(next); next.focus();
+    });
+  });
+
+  // キーボードで枠を操作
+  el.textContainer.addEventListener('keydown', (e) => {
+    if (!state.showGuides) return;
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    const b = state.box;
+    if (d) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        b.width = clamp(b.width + d[0], 15, 100 - b.left);
+        b.height = clamp(b.height + d[1], 10, 100 - b.top);
+      } else {
+        b.left = clamp(b.left + d[0], 0, 100 - b.width);
+        b.top = clamp(b.top + d[1], 0, 100 - b.height);
+      }
+      updatePreview();
+    } else if (e.key === '+' || e.key === '=') { e.preventDefault(); setValue('fontSize', state.fontSize + 1); }
+    else if (e.key === '-') { e.preventDefault(); setValue('fontSize', state.fontSize - 1); }
+  });
+
+  window.addEventListener('resize', () => requestAnimationFrame(updatePreview));
+  if (document.fonts) document.fonts.addEventListener?.('loadingdone', () => requestAnimationFrame(updateFit));
+
+  setupDragInteractions();
+  setupEditor();
+}
+
+/* ポインターイベントでマウス・タッチ・ペンを統一 */
+function setupDragInteractions() {
+  let drag = null;
+
+  function bind(node, action) {
+    node.addEventListener('pointerdown', (e) => {
+      if (action === 'moveBox' && !state.showGuides) return;
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      node.setPointerCapture(e.pointerId);
+      drag = { action, node, x: e.clientX, y: e.clientY, box: { ...state.box }, font: state.fontSize };
+      node.classList.add('is-active');
+      document.body.classList.add('is-dragging');
+      if (action === 'resizeFont') { el.dragBadge.hidden = false; el.dragBadge.textContent = `文字 ${state.fontSize}`; }
+    });
+    node.addEventListener('pointermove', onMove);
+    node.addEventListener('pointerup', onEnd);
+    node.addEventListener('pointercancel', onEnd);
+  }
+
+  function onMove(e) {
+    if (!drag) return;
+    const rect = el.paperWrapper.getBoundingClientRect();
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    const px = (dx / rect.width) * 100, py = (dy / rect.height) * 100;
+    const b = state.box, s = drag.box;
+    switch (drag.action) {
+      case 'resizeFont':
+        state.fontSize = clamp(Math.round(drag.font + (dx + dy) * 0.4), LIMITS.fontSize.min, LIMITS.fontSize.max);
+        el.dragBadge.textContent = `文字 ${state.fontSize}`;
+        break;
+      case 'moveBox':
+        b.left = clamp(s.left + px, 0, 100 - b.width);
+        b.top = clamp(s.top + py, 0, 100 - b.height);
+        break;
+      case 'resizeWidth':
+        b.width = clamp(s.width + px, 15, 100 - b.left);
+        break;
+      case 'resizeHeight':
+        b.height = clamp(s.height + py, 10, 100 - b.top);
+        break;
+    }
+    updatePreview();
+  }
+
+  function onEnd() {
+    if (!drag) return;
+    drag.node.classList.remove('is-active');
+    document.body.classList.remove('is-dragging');
+    el.dragBadge.hidden = true;
+    drag = null;
+  }
+
+  bind(el.fontSizeHandle, 'resizeFont');
+  bind(el.areaWidthHandle, 'resizeWidth');
+  bind(el.areaHeightHandle, 'resizeHeight');
+  bind(el.textContainer, 'moveBox');
+}
+
+/* ---------- 保存 ---------- */
+async function savePreviewImage() {
+  if (!state.hasImage) return;
+  const img = el.paperImage;
+  const dw = img.clientWidth, dh = img.clientHeight;
+  if (!dw || !dh) return;
+
+  const scale = Math.max((img.naturalWidth || dw * 2) / dw, 1.5);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(dw * scale);
+  canvas.height = Math.round(dh * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const padding = 4 * scale;
+  const boxLeft = (state.box.left / 100) * canvas.width + padding;
+  const boxTop = (state.box.top / 100) * canvas.height + padding;
+  const boxWidth = Math.max(10, (state.box.width / 100) * canvas.width - padding * 2);
+  const boxHeight = Math.max(10, (state.box.height / 100) * canvas.height - padding * 2);
+
+  const fontSize = effFont() * scale;
+  const familyName = state.fontFamily === 'font-handwriting-2' ? 'Yomogi' : 'Klee One';
+  try { await document.fonts.load(`${fontSize}px "${familyName}"`, state.text); } catch (_) {}
+  ctx.font = `${fontSize}px "${familyName}", cursive`;
+  ctx.fillStyle = state.textColor;
+
+  const lineAdvance = fontSize * state.lineHeight;
+  const letterSpacingPx = fontSize * state.letterSpacing;
+  const paragraphs = state.text.split('\n');
+
+  if (state.direction === 'horizontal') {
+    ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    let cursorY = boxTop + (lineAdvance - fontSize) / 2;
+    for (const para of paragraphs) {
+      if (!para.length) { cursorY += lineAdvance; continue; }
+      let cursorX = boxLeft;
+      for (const ch of Array.from(para)) {
+        const w = ctx.measureText(ch).width;
+        if (cursorX > boxLeft && cursorX + w > boxLeft + boxWidth) { cursorX = boxLeft; cursorY += lineAdvance; }
+        ctx.fillText(ch, cursorX, cursorY);
+        cursorX += w + letterSpacingPx;
+      }
+      cursorY += lineAdvance;
+    }
+  } else {
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    let cursorX = boxLeft + boxWidth - (lineAdvance - fontSize) / 2 - fontSize / 2;
+    const rotateChars = new Set(['ー', '−', '―', '…', '‥', '（', '）', '(', ')', '「', '」', '『', '』', '【', '】', '〜', '～', '＝', '=']);
+    const smallPunct = new Set(['、', '。', '，', '．']);
+    for (const para of paragraphs) {
+      if (!para.length) { cursorX -= lineAdvance; continue; }
+      let cursorY = boxTop + fontSize / 2;
+      for (const ch of Array.from(para)) {
+        if (cursorY > boxTop + fontSize / 2 && cursorY + fontSize / 2 > boxTop + boxHeight) {
+          cursorY = boxTop + fontSize / 2; cursorX -= lineAdvance;
+        }
+        if (rotateChars.has(ch)) {
+          ctx.save(); ctx.translate(cursorX, cursorY); ctx.rotate(Math.PI / 2); ctx.fillText(ch, 0, 0); ctx.restore();
+        } else if (smallPunct.has(ch)) {
+          ctx.fillText(ch, cursorX + fontSize * 0.28, cursorY - fontSize * 0.28);
+        } else {
+          ctx.fillText(ch, cursorX, cursorY);
+        }
+        cursorY += fontSize + letterSpacingPx;
+      }
+      cursorX -= lineAdvance;
+    }
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.download = `handwriting-preview-${stamp}.png`;
+    a.href = url;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, 'image/png');
+}
+
+function init() {
+  el.messageInput.value = state.text;
+  setupEventListeners();
+  updatePreview();
+}
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
