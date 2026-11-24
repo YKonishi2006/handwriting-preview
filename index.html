@@ -724,9 +724,13 @@
 
             <!-- AR文字オーバーレイレイヤー（ドラッグ・ピンチ移動可能） -->
             <div id="arOverlayTouchArea" class="absolute inset-0 overflow-hidden cursor-move touch-none z-10">
-                <!-- 文字枠コンテナ -->
-                <div id="arTextContainer" class="absolute p-3 rounded-lg border-2 border-dashed border-cyan-400/50 bg-cyan-400/5 transition-colors" style="left: 15%; top: 15%; width: 70%; transform-origin: center center;">
-                    <div id="arPreviewText" class="w-full font-handwriting-1 break-words whitespace-pre-wrap leading-relaxed select-none" style="font-size: 22px; color: #00f0ff; text-shadow: 0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,240,255,0.6);">
+                <!-- 用紙の枠（プレビューと同じ縦横比・同じ大きさで組んでから、transformで拡大縮小する。
+                     拡大縮小しても改行位置や1行の文字数はプレビューと変わらない） -->
+                <div id="arTextContainer" class="absolute rounded-sm" style="left: 0; top: 0; transform-origin: center center;">
+                    <!-- 文章の枠（プレビューの点線枠と同じ位置・大きさ） -->
+                    <div id="arTextBox" class="absolute">
+                        <div id="arPreviewText" class="w-full h-full font-handwriting-1 break-words whitespace-pre-wrap overflow-hidden p-1.5 select-none" style="color: #00f0ff;">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -734,7 +738,7 @@
             <!-- 操作ヒント（自動でフェードアウト） -->
             <div id="arHintBadge" class="absolute top-16 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md text-white text-xs px-3.5 py-1.5 rounded-full pointer-events-none z-20 flex items-center gap-1.5 shadow-lg border border-white/20">
                 <i data-lucide="hand" class="w-3.5 h-3.5 text-cyan-400"></i>
-                <span>文字をドラッグして紙の位置に合わせられます</span>
+                <span>外枠を実物の用紙の端に合わせてください（ドラッグで移動・ピンチで拡大）</span>
             </div>
         </div>
 
@@ -925,6 +929,7 @@
             arRetryBtn: document.getElementById('arRetryBtn'),
             arOverlayTouchArea: document.getElementById('arOverlayTouchArea'),
             arTextContainer: document.getElementById('arTextContainer'),
+            arTextBox: document.getElementById('arTextBox'),
             arPreviewText: document.getElementById('arPreviewText'),
             arHintBadge: document.getElementById('arHintBadge'),
             arFreezeBtn: document.getElementById('arFreezeBtn'),
@@ -1159,6 +1164,11 @@
             el.charCountBadge.textContent = `${charCount}文字`;
             if (el.mobileCanvasCharCount) {
                 el.mobileCanvasCharCount.textContent = `${charCount}文字`;
+            }
+
+            // ARで同じ組版を再現するため、プレビューで見えている用紙の表示サイズを覚えておく
+            if (state.hasImage && el.paperImage.clientWidth) {
+                state.layoutRef = measurePaperLayout();
             }
 
             // スケーリングを考慮したフォントサイズ設定
@@ -1516,6 +1526,9 @@
                 updatePreview();
                 if (!el.imageEditModal.classList.contains('hidden')) {
                     renderEditCanvas();
+                }
+                if (!el.arCameraModal.classList.contains('hidden')) {
+                    updateArTextUI();
                 }
             });
 
@@ -2340,13 +2353,13 @@
             rotation: 0, // deg
             opacity: 0.65,
             color: '#00f0ff',
-            posX: 15, // %
-            posY: 15
+            posX: 50, // 用紙枠の中心（画面に対する%）
+            posY: 45
         };
 
         let isArDragging = false;
         let arDragStart = { x: 0, y: 0 };
-        let arInitialPos = { x: 15, y: 15 };
+        let arInitialPos = { x: 50, y: 45 };
         let arPinchStartDist = null;
         let arPinchStartScale = 100;
 
@@ -2447,43 +2460,68 @@
         }
 
         // ARテキストオーバーレイの表示同期
+        // プレビューで見えている用紙の大きさ。w/h は小数まで正確な表示寸法、
+        // fontW はプレビューの文字サイズ計算（getEffectiveFontSize）と同じ整数幅
+        function measurePaperLayout() {
+            const r = el.paperImage.getBoundingClientRect();
+            return { w: r.width, h: r.height, fontW: el.paperImage.clientWidth };
+        }
+
+        // プレビューと同じ組版の基準サイズ
+        function getArLayoutRef() {
+            if (state.hasImage && el.paperImage.clientWidth) return measurePaperLayout();
+            if (state.layoutRef) return state.layoutRef;
+            if (state.hasImage && el.paperImage.naturalWidth) {
+                // プレビューを一度も表示していない場合は基準幅600pxで組む（文字サイズの基準と同じ）
+                return { w: 600, h: 600 * el.paperImage.naturalHeight / el.paperImage.naturalWidth, fontW: 600 };
+            }
+            return { w: 600, h: 600 * Math.SQRT2, fontW: 600 }; // 用紙未選択時は便箋（A判）の比率
+        }
+
         function updateArTextUI() {
             el.arPreviewText.textContent = state.text;
 
-            // フォント・方向
-            el.arPreviewText.className = `w-full ${state.fontFamily} break-words whitespace-pre-wrap leading-relaxed select-none`;
-            if (state.direction === 'vertical') {
-                el.arPreviewText.classList.add('vertical-rl');
-            } else {
-                el.arPreviewText.classList.remove('vertical-rl');
-            }
+            // 1. プレビューと同じ大きさで用紙枠と文章枠を組む
+            const ref = getArLayoutRef();
+            const frame = el.arTextContainer;
+            frame.style.width = `${ref.w}px`;
+            frame.style.height = `${ref.h}px`;
+            el.arTextBox.style.left = `${state.box.left}%`;
+            el.arTextBox.style.top = `${state.box.top}%`;
+            el.arTextBox.style.width = `${state.box.width}%`;
+            el.arTextBox.style.height = `${state.box.height}%`;
 
-            // 基本サイズ 22px に拡大スケールを乗算
-            const baseSize = 22;
-            const currentSize = Math.max(10, Math.round(baseSize * (arState.scale / 100)));
-            el.arPreviewText.style.fontSize = `${currentSize}px`;
+            // 文字の組み方もプレビューと同じ（書体・方向・サイズ・行間・字間・余白）
+            el.arPreviewText.className = `w-full h-full ${state.fontFamily} break-words whitespace-pre-wrap overflow-hidden p-1.5 select-none`;
+            if (state.direction === 'vertical') el.arPreviewText.classList.add('vertical-rl');
+            el.arPreviewText.style.fontSize = `${state.fontSize * ref.fontW / 600}px`;
             el.arPreviewText.style.lineHeight = state.lineHeight;
             el.arPreviewText.style.letterSpacing = `${state.letterSpacing}em`;
 
-            // カラーとネオンシャドウ（カメラ映像に重ねても読みやすい高コントラスト設計）
+            // 2. カメラ映像に重ねても見やすい色（組版には影響しない）
             el.arPreviewText.style.color = arState.color;
-            if (arState.color === '#1e293b') {
-                el.arPreviewText.style.textShadow = '0 0 2px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.7)';
-                el.arTextContainer.style.borderColor = 'rgba(255,255,255,0.5)';
-                el.arTextContainer.style.backgroundColor = 'rgba(255,255,255,0.08)';
-            } else {
-                el.arPreviewText.style.textShadow = `0 0 4px rgba(0,0,0,0.95), 0 0 8px ${arState.color}`;
-                el.arTextContainer.style.borderColor = `${arState.color}80`;
-                el.arTextContainer.style.backgroundColor = `${arState.color}15`;
-            }
+            const isInk = arState.color === '#1e293b';
+            const lineColor = isInk ? 'rgba(255,255,255,0.75)' : `${arState.color}b0`;
+            el.arPreviewText.style.textShadow = isInk
+                ? '0 0 2px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.7)'
+                : `0 0 4px rgba(0,0,0,0.95), 0 0 8px ${arState.color}`;
+            frame.style.outline = `2px solid ${lineColor}`;       // 用紙の端
+            frame.style.backgroundColor = isInk ? 'rgba(255,255,255,0.06)' : `${arState.color}0d`;
+            el.arTextBox.style.outline = `1.5px dashed ${lineColor}`; // 書く範囲
+            frame.style.opacity = arState.opacity;
 
-            // 不透明度
-            el.arTextContainer.style.opacity = arState.opacity;
-
-            // 位置と回転
-            el.arTextContainer.style.left = `${arState.posX}%`;
-            el.arTextContainer.style.top = `${arState.posY}%`;
-            el.arTextContainer.style.transform = `rotate(${arState.rotation}deg)`;
+            // 3. 画面に収まる倍率 × 「大きさ」スライダー で拡大縮小し、位置と傾きを反映
+            const modalRect = el.arCameraModal.getBoundingClientRect();
+            const vw = modalRect.width || window.innerWidth;
+            const vh = modalRect.height || window.innerHeight;
+            const fit = Math.min((vw * 0.86) / ref.w, (vh * 0.6) / ref.h);
+            const s = fit * (arState.scale / 100);
+            frame.style.left = `${(arState.posX / 100) * vw - ref.w / 2}px`;
+            frame.style.top = `${(arState.posY / 100) * vh - ref.h / 2}px`;
+            frame.style.transform = `rotate(${arState.rotation}deg) scale(${s})`;
+            // 拡大縮小しても線の太さが変わらないよう補正
+            frame.style.outlineWidth = `${2 / s}px`;
+            el.arTextBox.style.outlineWidth = `${1.5 / s}px`;
 
             // HUD表示の更新
             el.arOpacityValue.textContent = `${Math.round(arState.opacity * 100)}%`;
@@ -2546,8 +2584,8 @@
 
             // 位置リセット
             el.arResetPosBtn.addEventListener('click', () => {
-                arState.posX = 15;
-                arState.posY = 15;
+                arState.posX = 50;
+                arState.posY = 45;
                 arState.scale = 100;
                 arState.rotation = 0;
                 updateArTextUI();
@@ -2570,8 +2608,8 @@
                 const dxPercent = ((e.clientX - arDragStart.x) / modalRect.width) * 100;
                 const dyPercent = ((e.clientY - arDragStart.y) / modalRect.height) * 100;
 
-                arState.posX = Math.max(-20, Math.min(80, arInitialPos.x + dxPercent));
-                arState.posY = Math.max(-20, Math.min(80, arInitialPos.y + dyPercent));
+                arState.posX = Math.max(0, Math.min(100, arInitialPos.x + dxPercent));
+                arState.posY = Math.max(0, Math.min(100, arInitialPos.y + dyPercent));
                 updateArTextUI();
             });
 
@@ -2603,8 +2641,8 @@
                     const dxPercent = ((e.touches[0].clientX - arDragStart.x) / modalRect.width) * 100;
                     const dyPercent = ((e.touches[0].clientY - arDragStart.y) / modalRect.height) * 100;
 
-                    arState.posX = Math.max(-20, Math.min(80, arInitialPos.x + dxPercent));
-                    arState.posY = Math.max(-20, Math.min(80, arInitialPos.y + dyPercent));
+                    arState.posX = Math.max(0, Math.min(100, arInitialPos.x + dxPercent));
+                    arState.posY = Math.max(0, Math.min(100, arInitialPos.y + dyPercent));
                     updateArTextUI();
                 } else if (e.touches.length === 2 && arPinchStartDist) {
                     e.preventDefault();
