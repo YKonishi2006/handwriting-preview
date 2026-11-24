@@ -1009,6 +1009,13 @@
             updatePreview();
             setMobileView('preview');
             setupEventListeners();
+
+            // 手書きフォントの読み込みが終わると文字幅が変わるため、収まり判定をやり直す
+            // （初回訪問時、読み込み前の判定で「はみ出し」と誤表示されるのを防ぐ）
+            if (document.fonts) {
+                document.fonts.addEventListener('loadingdone', () => requestAnimationFrame(updatePreview));
+                document.fonts.ready.then(() => requestAnimationFrame(updatePreview));
+            }
         }
 
         // モバイル表示切り替え
