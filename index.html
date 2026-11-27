@@ -110,6 +110,12 @@
             }
         }
 
+        /* 用紙の拡大表示: ピンチやホイールの操作をブラウザのページ拡大ではなく用紙の拡大に使う */
+        #canvasContainer { touch-action: none; }
+        #canvasContainer.is-zoomed { cursor: grab; }
+        #canvasContainer.is-panning { cursor: grabbing; }
+        #zoomControls button:disabled { opacity: .35; pointer-events: none; }
+
         /* 用紙キャンバスの背景パターン */
         .canvas-bg-light {
             background-color: #f1f3f7;
@@ -180,7 +186,13 @@
             body.landscape-phone #floatingControls button { width: 40px; height: 40px; justify-content: center; padding: 0; }
 
             /* キーボード表示中 */
-            body.kb-open header, body.kb-open #mobileTabBar, body.kb-open #floatingControls { display: none !important; }
+            body.kb-open header, body.kb-open #mobileTabBar, body.kb-open #floatingControls, body.kb-open #zoomControls { display: none !important; }
+            #zoomControls { bottom: 8px; left: 12px; }
+            body.sheet-open #zoomControls,
+            body.landscape-phone #zoomControls {
+                flex-direction: column; bottom: auto; top: 50%; transform: translateY(-50%); left: 6px;
+            }
+            body.sheet-open #zoomValue, body.landscape-phone #zoomValue { width: 40px; font-size: 11px; }
             body.kb-open #canvasContainer { padding: 36px 12px 6px; }
             /* iPhoneは16px未満の入力欄をタップすると画面を拡大してしまうため16pxにする */
             #messageInput { font-size: 16px; }
@@ -358,6 +370,17 @@
             </div>
 
             <!-- キャンバス右下のフローティングツールバー（デスクトップ & モバイルプレビュー時、ボトムバーの上部に配置） -->
+            <!-- 用紙の拡大表示（確認用。切り抜きはしない） -->
+            <div id="zoomControls" class="hidden absolute sm:bottom-4 sm:left-4 flex items-center gap-1 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-1 rounded-2xl shadow-lg border border-slate-200/80 dark:border-slate-800 z-20" role="group" aria-label="用紙の拡大表示">
+                <button id="zoomOutBtn" type="button" class="w-10 h-10 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center focus-visible-ring" aria-label="縮小して表示" title="縮小">
+                    <i data-lucide="zoom-out" class="w-4 h-4"></i>
+                </button>
+                <button id="zoomValue" type="button" class="h-10 min-w-[52px] px-1 rounded-xl text-xs font-mono font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible-ring" aria-label="拡大を解除して全体を表示" title="全体を表示">100%</button>
+                <button id="zoomInBtn" type="button" class="w-10 h-10 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center focus-visible-ring" aria-label="拡大して表示" title="拡大">
+                    <i data-lucide="zoom-in" class="w-4 h-4"></i>
+                </button>
+            </div>
+
             <div id="floatingControls" class="hidden absolute bottom-16 right-3 sm:bottom-4 sm:right-4 flex items-center gap-1.5 sm:gap-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-lg border border-slate-200/80 dark:border-slate-800 z-20">
                 <button id="floatAdjustPaperBtn" type="button" class="h-8 sm:h-9 text-xs font-semibold px-2.5 sm:px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center gap-1 focus-visible-ring" title="用紙の向きや傾き、拡大を調整">
                     <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
@@ -447,6 +470,7 @@
                         <ul class="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300 pl-0.5 leading-relaxed">
                             <li><strong>青い点線枠</strong>をドラッグして、書き出し位置と枠サイズを合わせます。</li>
                             <li><strong>右下の丸い朱色ハンドル</strong>をドラッグすると、文字サイズを拡大・縮小できます。</li>
+                            <li><strong>用紙の拡大</strong>：ピンチ（パソコンはホイール）や左下の＋で細部を確認できます。拡大中は2本指（枠の外なら1本指）でドラッグして移動、ダブルタップか「％」の表示を押すと全体表示に戻ります。</li>
                             <li><strong>キーボード操作</strong>：枠を選択後、矢印キーで位置移動、Shift+矢印で枠サイズ、＋/ーキーで文字サイズを変更できます。</li>
                         </ul>
                     </div>
@@ -1058,12 +1082,158 @@
             setMobileView('preview');
             setupEventListeners();
             setupMobileEditing();
+            setupZoom();
 
             // 手書きフォントの読み込みが終わると文字幅が変わるため、収まり判定をやり直す
             if (document.fonts) {
                 document.fonts.addEventListener('loadingdone', () => requestAnimationFrame(updatePreview));
                 document.fonts.ready.then(() => requestAnimationFrame(updatePreview));
             }
+        }
+
+        // --- 用紙の拡大表示（確認用） ---
+        // 用紙のレイアウト寸法は変えず、表示だけを transform で拡大・移動する。
+        // そのため文字サイズ・改行・収まり判定・保存画像には影響しない。
+        const ZOOM_MIN = 1, ZOOM_MAX = 5;
+        const zoomView = { s: 1, x: 0, y: 0 };
+
+        // 拡大前の用紙の中心（画面座標）
+        function paperLayoutCenter() {
+            const c = el.canvasContainer.getBoundingClientRect();
+            const w = el.paperWrapper;
+            return { x: c.left + w.offsetLeft + w.offsetWidth / 2, y: c.top + w.offsetTop + w.offsetHeight / 2 };
+        }
+
+        // 用紙の端が元の表示範囲より内側に入り込みすぎないよう移動量を制限
+        function clampZoom() {
+            if (zoomView.s <= ZOOM_MIN + 0.001) { zoomView.s = ZOOM_MIN; zoomView.x = 0; zoomView.y = 0; return; }
+            const w = el.paperWrapper.offsetWidth, h = el.paperWrapper.offsetHeight;
+            const mx = (w * (zoomView.s - 1)) / 2 + 24, my = (h * (zoomView.s - 1)) / 2 + 24;
+            zoomView.x = Math.max(-mx, Math.min(mx, zoomView.x));
+            zoomView.y = Math.max(-my, Math.min(my, zoomView.y));
+        }
+
+        function applyZoom(animate) {
+            const w = el.paperWrapper;
+            w.style.transition = animate ? 'transform .2s ease' : 'none';
+            w.style.transform = zoomView.s === 1 ? '' : `translate(${zoomView.x}px, ${zoomView.y}px) scale(${zoomView.s})`;
+            const zv = document.getElementById('zoomValue');
+            if (zv) zv.textContent = `${Math.round(zoomView.s * 100)}%`;
+            const zo = document.getElementById('zoomOutBtn'), zi = document.getElementById('zoomInBtn');
+            if (zo) zo.disabled = zoomView.s <= ZOOM_MIN;
+            if (zi) zi.disabled = zoomView.s >= ZOOM_MAX;
+            el.canvasContainer.classList.toggle('is-zoomed', zoomView.s > 1);
+        }
+
+        // 画面上の点 (px, py) を中心に拡大率を newS にする（点を省略すると今見えている中央）
+        function zoomAt(newS, px, py, animate) {
+            newS = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newS));
+            const c = paperLayoutCenter();
+            if (px === undefined) { px = c.x + zoomView.x; py = c.y + zoomView.y; }
+            zoomView.x = px - c.x - (newS * (px - c.x - zoomView.x)) / zoomView.s;
+            zoomView.y = py - c.y - (newS * (py - c.y - zoomView.y)) / zoomView.s;
+            zoomView.s = newS;
+            clampZoom();
+            applyZoom(animate);
+        }
+
+        function resetZoom(animate = true) {
+            zoomView.s = 1; zoomView.x = 0; zoomView.y = 0;
+            applyZoom(animate);
+        }
+
+        function setupZoom() {
+            const canvas = el.canvasContainer;
+            document.getElementById('zoomInBtn').addEventListener('click', () => zoomAt(zoomView.s * 1.5, undefined, undefined, true));
+            document.getElementById('zoomOutBtn').addEventListener('click', () => zoomAt(zoomView.s / 1.5, undefined, undefined, true));
+            document.getElementById('zoomValue').addEventListener('click', () => resetZoom(true));
+
+            // ホイール（トラックパッドのピンチも含む）で拡大縮小
+            canvas.addEventListener('wheel', (e) => {
+                if (!state.hasImage) return;
+                e.preventDefault();
+                zoomAt(zoomView.s * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX, e.clientY, false);
+            }, { passive: false });
+
+            // 操作ボタンや枠の上では拡大・移動を始めない
+            const isUiTarget = (t) => !!t.closest('#floatingControls, #zoomControls, #mobileCanvasStatus, #emptyState, button, label, input');
+            const isBoxTarget = (t) => state.showGuides && !!t.closest('#textContainer');
+
+            const pts = new Map();
+            let gesture = null;
+            let lastTap = null;
+            const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+            canvas.addEventListener('pointerdown', (e) => {
+                if (!state.hasImage || isUiTarget(e.target)) return;
+                pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: Date.now(), sx: e.clientX, sy: e.clientY, onBox: isBoxTarget(e.target) });
+                if (pts.size === 2) {
+                    // ピンチ開始（枠のドラッグ中なら打ち切る）
+                    if (window.cancelBoxDrag) window.cancelBoxDrag();
+                    const [a, b] = [...pts.values()];
+                    const m = mid(a, b), c = paperLayoutCenter();
+                    gesture = { type: 'pinch', d0: dist(a, b) || 1, s0: zoomView.s,
+                        qx: (m.x - c.x - zoomView.x) / zoomView.s, qy: (m.y - c.y - zoomView.y) / zoomView.s };
+                    canvas.classList.add('is-panning');
+                } else if (pts.size === 1 && zoomView.s > 1 && !isBoxTarget(e.target)) {
+                    gesture = { type: 'pan', sx: e.clientX, sy: e.clientY, x0: zoomView.x, y0: zoomView.y };
+                    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* キャプチャできなくても移動は続ける */ }
+                    canvas.classList.add('is-panning');
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                const p = pts.get(e.pointerId);
+                if (!p) return;
+                p.x = e.clientX; p.y = e.clientY;
+                if (gesture && gesture.type === 'pinch' && pts.size >= 2) {
+                    const [a, b] = [...pts.values()];
+                    const m = mid(a, b), c = paperLayoutCenter();
+                    const newS = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, gesture.s0 * dist(a, b) / gesture.d0));
+                    // 指の間にあった用紙の点が、指の中点についてくるように移動
+                    zoomView.s = newS;
+                    zoomView.x = m.x - c.x - newS * gesture.qx;
+                    zoomView.y = m.y - c.y - newS * gesture.qy;
+                    clampZoom();
+                    applyZoom(false);
+                } else if (gesture && gesture.type === 'pan') {
+                    zoomView.x = gesture.x0 + (e.clientX - gesture.sx);
+                    zoomView.y = gesture.y0 + (e.clientY - gesture.sy);
+                    clampZoom();
+                    applyZoom(false);
+                }
+            });
+
+            const end = (e) => {
+                const p = pts.get(e.pointerId);
+                pts.delete(e.pointerId);
+                if (pts.size < 2 && gesture && gesture.type === 'pinch') gesture = null;
+                if (pts.size === 0) { gesture = null; canvas.classList.remove('is-panning'); }
+
+                // ダブルタップ（タッチ）: 全体表示 ⇔ 2.5倍
+                if (e.type === 'pointerup' && p && e.pointerType !== 'mouse' && !p.onBox
+                    && Date.now() - p.t < 250 && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 10) {
+                    const now = Date.now();
+                    if (lastTap && now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+                        if (zoomView.s > 1) resetZoom(true); else zoomAt(2.5, e.clientX, e.clientY, true);
+                        lastTap = null;
+                    } else {
+                        lastTap = { t: now, x: e.clientX, y: e.clientY };
+                    }
+                }
+            };
+            canvas.addEventListener('pointerup', end);
+            canvas.addEventListener('pointercancel', end);
+
+            // ダブルクリック（マウス）: 全体表示 ⇔ 2.5倍
+            canvas.addEventListener('dblclick', (e) => {
+                if (!state.hasImage || isUiTarget(e.target) || isBoxTarget(e.target)) return;
+                if (zoomView.s > 1) resetZoom(true); else zoomAt(2.5, e.clientX, e.clientY, true);
+            });
+
+            // 画面サイズやパネルの開閉で用紙の大きさが変わったら、移動量を収め直す
+            if (window.ResizeObserver) new ResizeObserver(() => { clampZoom(); applyZoom(false); }).observe(canvas);
         }
 
         // スマホでプレビューを見ながら編集するための補助
@@ -1253,6 +1423,8 @@
                 el.emptyState.classList.add('hidden');
                 el.paperWrapper.classList.remove('hidden');
                 el.floatingControls.classList.remove('hidden');
+                document.getElementById('zoomControls').classList.remove('hidden');
+                resetZoom(false);
                 updatePreview();
             };
         }
@@ -2296,7 +2468,7 @@
                 if (activeAction === 'resizeFont') {
                     const dx = coords.x - startX;
                     const dy = coords.y - startY;
-                    const delta = (dx + dy) * 0.35;
+                    const delta = (dx + dy) * 0.35 / zoomView.s; // 拡大表示中も用紙に対して同じ感覚で変わるように
                     const newSize = Math.max(8, Math.min(64, Math.round(initialFontSize + delta)));
                     state.fontSize = newSize;
                     updatePreview();
@@ -2320,6 +2492,8 @@
             const onEnd = () => {
                 activeAction = null;
             };
+            // 2本指のピンチを始めたら、1本目の指で始まった枠のドラッグを打ち切る
+            window.cancelBoxDrag = onEnd;
 
             window.addEventListener('mousemove', onMove);
             window.addEventListener('touchmove', onMove, { passive: false });
@@ -2573,7 +2747,8 @@
         // fontW はプレビューの文字サイズ計算（getEffectiveFontSize）と同じ整数幅
         function measurePaperLayout() {
             const r = el.paperImage.getBoundingClientRect();
-            return { w: r.width, h: r.height, fontW: el.paperImage.clientWidth };
+            // 拡大表示（transform）の分を除いた、本来の表示寸法
+            return { w: r.width / zoomView.s, h: r.height / zoomView.s, fontW: el.paperImage.clientWidth };
         }
 
         // プレビューと同じ組版の基準サイズ
