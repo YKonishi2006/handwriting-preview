@@ -141,26 +141,64 @@
             #themeToggleBtn, #btnSamplePaper { display: none; } /* サンプル便箋は初期画面からも選べる */
         }
 
-        /* キャンバス: 上の収まり表示・下の操作ボタン・タブバーに用紙が隠れないよう余白を確保 */
+        /* ===== スマホ: プレビューを見ながら編集できるレイアウト =====
+           「用紙プレビュー」タブ: 用紙を全面表示
+           「文章入力」「文字・書式」タブ: 上に用紙プレビュー、下に編集パネル（境目をドラッグで高さ調整）
+           キーボード表示中: ヘッダーとタブバーを隠し、キーボードの上に用紙と入力欄を収める */
         @media (max-width: 1023px) {
-            :root { --tabbar-h: 58px; --header-h: 49px; }
-            #canvasContainer { padding-top: 46px; padding-bottom: calc(var(--tabbar-h) + 60px); }
-            #paperImage { max-height: calc(100dvh - var(--header-h) - var(--tabbar-h) - 46px - 60px - 8px) !important; }
-            #floatingControls { bottom: calc(var(--tabbar-h) + 8px) !important; right: 12px !important; }
-        }
-        /* 横向きのスマホ: 操作ボタンを右端に縦並びにして、用紙の高さを確保 */
-        @media (max-width: 1023px) and (orientation: landscape) and (max-height: 540px) {
-            #canvasContainer { padding-bottom: calc(var(--tabbar-h) + 8px); padding-right: 72px; padding-left: 72px; }
-            #paperImage { max-height: calc(100dvh - var(--header-h) - var(--tabbar-h) - 46px - 16px) !important; }
-            #floatingControls {
-                flex-direction: column;
-                top: calc(50% - var(--tabbar-h) / 2); bottom: auto !important;
-                transform: translateY(-50%); right: 8px !important;
+            :root { --tabbar-h: 58px; }
+            body { height: var(--app-h, 100dvh) !important; }
+            #workspace { padding-bottom: var(--tabbar-h); }
+
+            /* 用紙は、キャンバス領域（上の収まり表示・操作ボタンの余白を除いた内側）に収まる最大サイズ */
+            #canvasContainer { container-type: size; padding: 44px 12px 60px; }
+            #paperImage { max-height: calc(100cqh - 4px) !important; max-width: calc(100cqw - 4px) !important; }
+            #floatingControls { bottom: 8px !important; right: 12px !important; }
+
+            /* 下の編集パネル */
+            #mainAside.mobile-sheet {
+                height: var(--sheet-h, 46%); flex: none; min-height: 0;
+                border-top-left-radius: 16px; border-top-right-radius: 16px;
+                box-shadow: 0 -6px 20px rgba(15, 23, 42, .12);
             }
-            #floatingControls button > span {
+            #mainAside.mobile-sheet #desktopStatusCard { display: none; } /* 収まり表示は用紙の上に出ているので省く */
+            #mainAside.mobile-sheet > div.overflow-y-auto { padding-bottom: 16px; }
+            #mainAside.mobile-sheet #sheetGrabber { display: flex; }
+
+            /* パネルを開いている間と横向きでは、操作ボタンを用紙の右側に縦並びにして用紙の高さを確保 */
+            body.sheet-open #canvasContainer { padding: 42px 56px 8px; }
+            body.sheet-open #floatingControls,
+            body.landscape-phone #floatingControls {
+                flex-direction: column; padding: 6px;
+                top: 50%; bottom: auto !important; transform: translateY(-50%); right: 6px !important;
+            }
+            body.sheet-open #floatingControls button > span,
+            body.landscape-phone #floatingControls button > span {
                 position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
             }
-            #floatingControls button { width: 40px; justify-content: center; padding: 0; }
+            body.sheet-open #floatingControls button,
+            body.landscape-phone #floatingControls button { width: 40px; height: 40px; justify-content: center; padding: 0; }
+
+            /* キーボード表示中 */
+            body.kb-open header, body.kb-open #mobileTabBar, body.kb-open #floatingControls { display: none !important; }
+            body.kb-open #canvasContainer { padding: 36px 12px 6px; }
+            /* iPhoneは16px未満の入力欄をタップすると画面を拡大してしまうため16pxにする */
+            #messageInput { font-size: 16px; }
+            body.kb-open #workspace { padding-bottom: 0; }
+            body.kb-open #mainAside.mobile-sheet { height: var(--sheet-kb-h, 50%); border-radius: 0; }
+            body.kb-open #tab-text > div:not(:first-child) { display: none; } /* 例文と使い方は隠して入力欄を広く */
+            body.kb-open #messageInput { height: calc(var(--sheet-kb-h, 200px) - 64px); min-height: 72px; }
+        }
+        /* 横向きのスマホ: 用紙を左、編集パネルを右に並べる */
+        @media (max-width: 1023px) and (orientation: landscape) and (max-height: 540px) {
+            #workspace { flex-direction: row !important; }
+            #canvasContainer, body.sheet-open #canvasContainer { padding: 44px 56px 8px; }
+            #mainAside.mobile-sheet {
+                height: auto; width: min(360px, 48vw); border-radius: 0;
+                border-top: 0; border-left: 1px solid rgba(148, 163, 184, .35);
+            }
+            #mainAside.mobile-sheet #sheetGrabber { display: none; }
+            body.kb-open #mainAside.mobile-sheet { height: auto; }
         }
     </style>
 </head>
@@ -218,7 +256,7 @@
     </header>
 
     <!-- メインワークスペース -->
-    <div class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+    <div id="workspace" class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         
         <!-- キャンバスプレビューエリア（モバイルでは tab-preview 時に画面いっぱい表示） -->
         <main id="canvasContainer" class="flex-1 relative canvas-bg-light dark:canvas-bg-dark flex items-center justify-center p-2 sm:p-4 lg:p-6 overflow-hidden select-none transition-colors" role="region" aria-label="用紙プレビューキャンバス">
@@ -339,6 +377,11 @@
         <!-- コントロールパネル（デスクトップでは右カラム、スマホでは選択されたタブに応じて全画面表示） -->
         <aside id="mainAside" class="hidden lg:flex w-full lg:w-96 bg-white dark:bg-slate-900 flex-col h-full shrink-0 z-10 border-t lg:border-t-0 lg:border-l border-slate-200/80 dark:border-slate-800 transition-colors shadow-lg lg:shadow-none">
             
+            <!-- スマホ用: ドラッグでパネルの高さを変えるつまみ（ダブルタップで大小切替） -->
+            <div id="sheetGrabber" class="hidden justify-center items-center h-6 shrink-0 cursor-ns-resize touch-none" role="separator" aria-orientation="horizontal" aria-label="編集パネルの高さ（ドラッグで変更）" tabindex="0">
+                <span class="block w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+            </div>
+
             <!-- 上部ステータス表示（デスクトップ & モバイル編集パネル用） -->
             <div id="desktopStatusCard" class="flex items-center justify-between px-4 py-2.5 sm:py-3 bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200/80 dark:border-slate-800 shrink-0">
                 <div class="flex items-center gap-2.5">
@@ -1014,12 +1057,83 @@
             updatePreview();
             setMobileView('preview');
             setupEventListeners();
+            setupMobileEditing();
 
             // 手書きフォントの読み込みが終わると文字幅が変わるため、収まり判定をやり直す
             if (document.fonts) {
                 document.fonts.addEventListener('loadingdone', () => requestAnimationFrame(updatePreview));
                 document.fonts.ready.then(() => requestAnimationFrame(updatePreview));
             }
+        }
+
+        // スマホでプレビューを見ながら編集するための補助
+        function setupMobileEditing() {
+            const root = document.documentElement;
+            const vv = window.visualViewport;
+
+            // 用紙の表示サイズが変わったら文字サイズ（用紙幅に比例）と収まり判定を更新
+            let rafId = 0;
+            const refresh = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(updatePreview); };
+            if (window.ResizeObserver) new ResizeObserver(refresh).observe(el.canvasContainer);
+
+            // キーボード表示の検出: 見えている高さ（visualViewport）に画面を合わせる
+            const isTyping = () => {
+                const a = document.activeElement;
+                return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|number)$/.test(a.type)));
+            };
+            const syncViewport = () => {
+                if (window.innerWidth >= 1024) {
+                    root.style.removeProperty('--app-h');
+                    document.body.classList.remove('kb-open');
+                    return;
+                }
+                const h = vv ? vv.height : window.innerHeight;
+                root.style.setProperty('--app-h', `${h}px`);
+                const kb = isTyping() && !!vv && (window.innerHeight - vv.height > 120);
+                document.body.classList.toggle('kb-open', kb);
+                if (kb) {
+                    // キーボードの上で、用紙（55%）と入力欄（45%）を並べる
+                    root.style.setProperty('--sheet-kb-h', `${Math.round(h * 0.45)}px`);
+                    window.scrollTo(0, 0);
+                }
+                refresh();
+            };
+            if (vv) {
+                vv.addEventListener('resize', syncViewport);
+                vv.addEventListener('scroll', () => { if (document.body.classList.contains('kb-open')) window.scrollTo(0, 0); });
+            }
+            window.addEventListener('resize', syncViewport);
+            document.addEventListener('focusin', () => setTimeout(syncViewport, 60));
+            document.addEventListener('focusout', () => setTimeout(syncViewport, 60));
+            syncViewport();
+
+            // 編集パネルの高さをつまみのドラッグで変更（作業領域の25%〜75%）
+            const grab = document.getElementById('sheetGrabber');
+            const workspace = document.getElementById('workspace');
+            let drag = null;
+            const setSheet = (px) => {
+                const wh = workspace.getBoundingClientRect().height;
+                root.style.setProperty('--sheet-h', `${Math.round(Math.min(wh * 0.75, Math.max(wh * 0.25, px)))}px`);
+                refresh();
+            };
+            grab.addEventListener('pointerdown', (e) => {
+                drag = { y: e.clientY, h: el.mainAside.getBoundingClientRect().height };
+                grab.setPointerCapture(e.pointerId);
+            });
+            grab.addEventListener('pointermove', (e) => { if (drag) setSheet(drag.h + (drag.y - e.clientY)); });
+            const end = () => { drag = null; };
+            grab.addEventListener('pointerup', end);
+            grab.addEventListener('pointercancel', end);
+            grab.addEventListener('dblclick', () => {
+                const wh = workspace.getBoundingClientRect().height;
+                const cur = el.mainAside.getBoundingClientRect().height;
+                setSheet(cur > wh * 0.5 ? wh * 0.3 : wh * 0.65);
+            });
+            grab.addEventListener('keydown', (e) => {
+                const cur = el.mainAside.getBoundingClientRect().height;
+                if (e.key === 'ArrowUp') { e.preventDefault(); setSheet(cur + 24); }
+                if (e.key === 'ArrowDown') { e.preventDefault(); setSheet(cur - 24); }
+            });
         }
 
         // モバイル表示切り替え
@@ -1031,10 +1145,12 @@
 
             if (isDesktop) {
                 el.canvasContainer.classList.remove('hidden');
-                el.mainAside.classList.remove('hidden');
+                el.mainAside.classList.remove('hidden', 'mobile-sheet');
                 el.mainAside.classList.add('flex');
+                document.body.classList.remove('sheet-open', 'kb-open', 'landscape-phone');
                 return;
             }
+            document.body.classList.toggle('landscape-phone', window.matchMedia('(orientation: landscape) and (max-height: 540px)').matches);
 
             // モバイルボトムタブのアクティブ表示切替
             el.mobTabBtns.forEach(btn => {
@@ -1047,17 +1163,16 @@
                 }
             });
 
+            // 用紙プレビューは常に表示したまま、編集パネルを下（横向きは右）に出し入れする
+            el.canvasContainer.classList.remove('hidden');
             if (view === 'preview') {
-                el.canvasContainer.classList.remove('hidden');
                 el.mainAside.classList.add('hidden');
-                el.mainAside.classList.remove('flex');
-                requestAnimationFrame(() => {
-                    updatePreview();
-                });
+                el.mainAside.classList.remove('flex', 'mobile-sheet');
+                document.body.classList.remove('sheet-open');
             } else {
-                el.canvasContainer.classList.add('hidden');
                 el.mainAside.classList.remove('hidden');
-                el.mainAside.classList.add('flex');
+                el.mainAside.classList.add('flex', 'mobile-sheet');
+                document.body.classList.add('sheet-open');
 
                 if (view === 'text') {
                     el.tabText.classList.remove('hidden');
@@ -1515,14 +1630,8 @@
 
             // ウィンドウリサイズ時の再描画
             window.addEventListener('resize', () => {
-                const isDesktop = window.innerWidth >= 1024;
-                if (isDesktop) {
-                    el.canvasContainer.classList.remove('hidden');
-                    el.mainAside.classList.remove('hidden');
-                    el.mainAside.classList.add('flex');
-                } else {
-                    setMobileView(currentMobileView);
-                }
+                // デスクトップ幅ならスマホ用の表示状態を解除、スマホ幅なら現在のタブの表示を維持
+                setMobileView(currentMobileView);
                 updatePreview();
                 if (!el.imageEditModal.classList.contains('hidden')) {
                     renderEditCanvas();
